@@ -758,6 +758,7 @@
     let currentRoute = "home";
     let playerSrcWatcher = null;
     let lastPlayerSrc = "";
+    let lastAutoAdvanceKey = null;
 
     /******************************************************************
      * STORAGE HELPERS
@@ -1240,8 +1241,9 @@
         return `https://www.vidking.net/embed/movie/${item.tmdbId}?${autoplayParams}`;
       }
 
+      // Let our own script handle next-episode logic. Still enable the episode selector in the player UI.
       const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
-      return `${base}?${autoplayParams}&nextEpisode=true&episodeSelector=true&autonext=true`;
+      return `${base}?${autoplayParams}&episodeSelector=true`;
     }
 
     function stopPlayerWatcher() {
@@ -1455,6 +1457,48 @@
       });
     }
 
+    function autoAdvanceEpisode(item, season, episode) {
+      if (!item || item.type !== "tv") return;
+      const s = Number(season) || 1;
+      const e = Number(episode) || 1;
+
+      const key = `${item.type}-${item.tmdbId}-s${s}-e${e}`;
+      // Prevent double-triggering on repeated events from the same episode
+      if (lastAutoAdvanceKey === key) return;
+      lastAutoAdvanceKey = key;
+
+      (async () => {
+        const eps = await loadEpisodes(item, s);
+        if (!eps.length) return;
+
+        const idx = eps.findIndex((ep) => ep.episode_number === e);
+        if (idx === -1 || idx === eps.length - 1) {
+          // Last episode in the season → don’t auto-jump to next season for now
+          return;
+        }
+
+        const nextEpNum = eps[idx + 1].episode_number;
+
+        currentItem = item;
+        currentSeason = s;
+        currentEpisode = nextEpNum;
+
+        const src = buildVidkingUrl(item, currentSeason, currentEpisode);
+        playerContainer.innerHTML = `
+          <iframe
+            src="${src}"
+            frameborder="0"
+            allowfullscreen
+          ></iframe>
+        `;
+
+        item.lastSeason = currentSeason;
+        item.lastEpisode = currentEpisode;
+        markWatched(item);
+        renderPlayerDetails();
+      })();
+    }
+
     function openPlayer(item, { fromRoute }) {
       currentItem = item;
 
@@ -1540,6 +1584,7 @@
 
       const mediaType = info.mediaType === "tv" ? "tv" : "movie";
       const tmdbId = String(info.id);
+      const eventType = info.eventType || info.type || null;
 
       const item = library.find(
         (x) => x.type === mediaType && String(x.tmdbId) === tmdbId
@@ -1557,6 +1602,38 @@
       if (mediaType === "tv") {
         if (info.season) item.lastSeason = info.season;
         if (info.episode) item.lastEpisode = info.episode;
+      }
+
+      // Decide if this episode is effectively finished
+      const progress = typeof info.progress === "number" ? info.progress : null;
+      const duration = typeof info.duration === "number" ? info.duration : null;
+      const currentTime =
+        typeof info.currentTime === "number"
+          ? info.currentTime
+          : typeof info.timestamp === "number"
+          ? info.timestamp
+          : null;
+
+      const nearEndByProgress = progress !== null && progress >= 98;
+      const nearEndByTime =
+        duration !== null &&
+        currentTime !== null &&
+        duration > 0 &&
+        duration - currentTime <= 5; // within 5 seconds of the end
+
+      const isTv = mediaType === "tv";
+      const hasEpisodeInfo = info.season != null && info.episode != null;
+
+      // Prefer the explicit "ended" event, but also handle platforms that never fire it
+      if (
+        isTv &&
+        hasEpisodeInfo &&
+        (
+          eventType === "ended" ||
+          eventType === "timeupdate" && (nearEndByProgress || nearEndByTime)
+        )
+      ) {
+        autoAdvanceEpisode(item, info.season, info.episode);
       }
 
       saveLibrary();
