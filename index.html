@@ -289,7 +289,8 @@
     .player-wrapper {
       position: relative;
       width: 100%;
-      aspect-ratio: 16 / 9;
+      /* 16:9 aspect ratio that works on older browsers (Android TV) */
+      padding-top: 56.25%;
       max-height: calc(100vh - 220px);
       border-radius: var(--radius-sm);
       overflow: hidden;
@@ -300,7 +301,8 @@
     body.theater .player-wrapper {
       position: relative;
       width: 100%;
-      aspect-ratio: 16 / 9;
+      /* same 16:9 ratio in theater mode */
+      padding-top: 56.25%;
       max-height: calc(100vh - 120px);
       border-radius: 0;
       margin: 0 auto 0.75rem;
@@ -1233,7 +1235,7 @@
      * PLAYER
      ******************************************************************/
     function buildVidkingUrl(item, season = 1, episode = 1) {
-      const autoplayParams = "autoplay=true";
+      const autoplayParams = "autoPlay=true";
       if (item.type === "movie") {
         return `https://www.vidking.net/embed/movie/${item.tmdbId}?${autoplayParams}`;
       }
