@@ -171,6 +171,24 @@
       box-shadow: 0 12px 30px rgba(0,0,0,0.4);
     }
 
+    .card-actions {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+      margin-top: 0.25rem;
+    }
+
+    .card-actions .btn {
+      flex: 1 1 100%;
+      text-align: center;
+      padding: 0.35rem 0.5rem;
+    }
+
+    .card-actions .btn.subtle {
+      color: #cbd5e1;
+      border-color: rgba(148,163,184,0.35);
+    }
+
     .item-card:hover {
       border-color: var(--accent);
       transform: translateY(-1px);
@@ -591,6 +609,12 @@
     <!-- LIBRARY SECTION -->
     <section id="librarySection" class="section">
       <div class="section-title-row">
+        <h2>My Watchlist (library)</h2>
+        <span id="libraryWatchlistCount"></span>
+      </div>
+      <div id="libraryWatchlistRow" class="card-row"></div>
+
+      <div class="section-title-row">
         <h2>My Library</h2>
         <span id="libraryCount"></span>
       </div>
@@ -699,6 +723,8 @@
 
     const libraryRow = document.getElementById("libraryRow");
     const libraryCount = document.getElementById("libraryCount");
+    const libraryWatchlistRow = document.getElementById("libraryWatchlistRow");
+    const libraryWatchlistCount = document.getElementById("libraryWatchlistCount");
 
     const searchInput = document.getElementById("searchInput");
     const filterSelect = document.getElementById("filterSelect");
@@ -762,10 +788,18 @@
       return library.find((x) => x.type === type && String(x.tmdbId) === String(tmdbId));
     }
 
-    function addToLibraryFromTmdbResult(result, isMovie) {
+    function addToLibraryFromTmdbResult(result, isMovie, { makeWatchlist = false } = {}) {
       const tmdbId = result.id;
       const existing = findInLibraryByTmdb(isMovie ? "movie" : "tv", tmdbId);
-      if (existing) return existing;
+      if (existing) {
+        if (makeWatchlist && !existing.isWatchlist) {
+          existing.isWatchlist = true;
+          saveLibrary();
+          renderHome();
+          renderLibrary();
+        }
+        return existing;
+      }
 
       const title = isMovie ? result.title : result.name;
       const date = isMovie ? result.release_date : result.first_air_date;
@@ -785,7 +819,7 @@
         poster,
         addedAt: Date.now(),
         lastWatchedAt: 0,
-        isWatchlist: false,
+        isWatchlist: !!makeWatchlist,
         lastSeason: 1,
         lastEpisode: 0,
         lastProgress: 0,
@@ -812,6 +846,22 @@
       renderHome();
       renderLibrary();
       updateWatchlistButton();
+    }
+
+    function removeFromLibrary(item) {
+      const idx = library.findIndex((x) => x.id === item.id);
+      if (idx === -1) return;
+
+      library.splice(idx, 1);
+      if (currentItem && currentItem.id === item.id) {
+        currentItem = null;
+        playerContainer.innerHTML = "";
+        renderPlayerDetails();
+      }
+
+      saveLibrary();
+      renderHome();
+      renderLibrary();
     }
 
     /******************************************************************
@@ -853,6 +903,41 @@
         pill.className = "pill-small";
         pill.textContent = "Watchlist";
         div.appendChild(pill);
+      }
+
+      if (opts.showActions) {
+        const actionsWrap = document.createElement("div");
+        actionsWrap.className = "card-actions";
+
+        const wlBtn = document.createElement("button");
+        wlBtn.className = "btn subtle";
+        wlBtn.type = "button";
+        const setWatchlistLabel = () => {
+          wlBtn.textContent = item.isWatchlist
+            ? "Remove from watchlist"
+            : "Add to watchlist";
+        };
+        setWatchlistLabel();
+        wlBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleWatchlist(item);
+          setWatchlistLabel();
+        });
+        actionsWrap.appendChild(wlBtn);
+
+        if (opts.onRemove) {
+          const removeBtn = document.createElement("button");
+          removeBtn.className = "btn";
+          removeBtn.type = "button";
+          removeBtn.textContent = "Remove from library";
+          removeBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            opts.onRemove(item);
+          });
+          actionsWrap.appendChild(removeBtn);
+        }
+
+        div.appendChild(actionsWrap);
       }
 
       div.addEventListener("click", () => {
@@ -948,6 +1033,33 @@
       const term = searchInput.value.trim().toLowerCase();
       const filter = filterSelect.value;
 
+      let watchlistItems = library.filter((x) => x.isWatchlist);
+      if (filter === "movie") watchlistItems = watchlistItems.filter((x) => x.type === "movie");
+      if (filter === "tv") watchlistItems = watchlistItems.filter((x) => x.type === "tv");
+
+      if (term) {
+        watchlistItems = watchlistItems.filter((x) =>
+          (x.title + " " + x.overview).toLowerCase().includes(term)
+        );
+      }
+      libraryWatchlistRow.innerHTML = "";
+      libraryWatchlistCount.textContent = watchlistItems.length
+        ? `${watchlistItems.length} items`
+        : "None";
+
+      watchlistItems
+        .sort((a, b) => b.addedAt - a.addedAt)
+        .forEach((item) => {
+          const card = makeCard(item, {
+            rightLabel: "Watchlist",
+            showWatchlistPill: true,
+            fromRoute: "library",
+            showActions: true,
+            onRemove: removeFromLibrary
+          });
+          libraryWatchlistRow.appendChild(card);
+        });
+
       let list = [...library];
 
       if (filter === "movie") list = list.filter((x) => x.type === "movie");
@@ -979,7 +1091,9 @@
           const card = makeCard(item, {
             rightLabel: label,
             showWatchlistPill: true,
-            fromRoute: "library"
+            fromRoute: "library",
+            showActions: true,
+            onRemove: removeFromLibrary
           });
           libraryRow.appendChild(card);
         });
@@ -991,6 +1105,14 @@
         setRoute("library");
       }
       renderLibrary();
+    });
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const query = searchInput.value;
+        if (tmdbSearchInput) tmdbSearchInput.value = query;
+        setRoute("home");
+        searchTmdb(query);
+      }
     });
     filterSelect.addEventListener("change", () => {
       if (currentRoute !== "library") {
@@ -1401,6 +1523,27 @@
         });
 
         actions.appendChild(addBtn);
+
+        const watchlistBtn = document.createElement("button");
+        watchlistBtn.className = "tmdb-button";
+        watchlistBtn.type = "button";
+        watchlistBtn.textContent = isMovie
+          ? "Add movie to watchlist"
+          : "Add show to watchlist";
+        watchlistBtn.addEventListener("click", () => {
+          const item = addToLibraryFromTmdbResult(r, isMovie, {
+            makeWatchlist: true
+          });
+          if (!item.isWatchlist) {
+            item.isWatchlist = true;
+            saveLibrary();
+          }
+          renderHome();
+          renderLibrary();
+          openPlayer(item, { fromRoute: "home" });
+        });
+
+        actions.appendChild(watchlistBtn);
         body.appendChild(actions);
 
         row.appendChild(body);
