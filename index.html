@@ -289,7 +289,8 @@
     .player-wrapper {
       position: relative;
       width: 100%;
-      aspect-ratio: 16 / 9;
+      /* 16:9 aspect ratio that works on older browsers (Android TV) */
+      padding-top: 56.25%;
       max-height: calc(100vh - 220px);
       border-radius: var(--radius-sm);
       overflow: hidden;
@@ -300,7 +301,8 @@
     body.theater .player-wrapper {
       position: relative;
       width: 100%;
-      aspect-ratio: 16 / 9;
+      /* same 16:9 ratio in theater mode */
+      padding-top: 56.25%;
       max-height: calc(100vh - 120px);
       border-radius: 0;
       margin: 0 auto 0.75rem;
@@ -530,6 +532,79 @@
     body.theater #playerSection {
       padding-top: 0.4rem;
     }
+
+    /* DEVICE ADAPTIVE STYLES */
+    body.mobile .page {
+      max-width: none;
+      padding: 0.75rem 0.65rem 1.6rem;
+    }
+
+    body.mobile header {
+      gap: 0.4rem;
+    }
+
+    body.mobile .controls {
+      width: 100%;
+      justify-content: space-between;
+      gap: 0.4rem;
+    }
+
+    body.mobile .search-input,
+    body.mobile .select-input {
+      flex: 1 1 0;
+      min-width: 0;
+      font-size: 0.95rem;
+      padding: 0.55rem 0.7rem;
+    }
+
+    body.mobile .nav-btn,
+    body.mobile .btn {
+      padding: 0.55rem 0.85rem;
+      font-size: 0.95rem;
+    }
+
+    body.mobile .item-card {
+      width: clamp(150px, 44vw, 220px);
+    }
+
+    body.mobile .card-row {
+      justify-content: center;
+    }
+
+    body.tv .page {
+      max-width: 1400px;
+      padding: 1.1rem 1rem 2rem;
+    }
+
+    body.tv .nav-btn,
+    body.tv .btn {
+      padding: 0.6rem 1rem;
+      font-size: 1rem;
+      letter-spacing: 0.02em;
+    }
+
+    body.tv .title-block h1 {
+      font-size: 2rem;
+    }
+
+    body.tv .controls {
+      gap: 0.8rem;
+    }
+
+    body.tv .search-input,
+    body.tv .select-input {
+      font-size: 1rem;
+      padding: 0.6rem 0.85rem;
+    }
+
+    body.tv .card-row {
+      justify-content: center;
+      gap: 1rem;
+    }
+
+    body.tv .item-card {
+      width: 180px;
+    }
   </style>
 </head>
 <body>
@@ -540,6 +615,7 @@
         <p>Home, library & player for our Vidking setup.</p>
         <div class="nav">
           <button class="nav-btn active" data-route="home">Home</button>
+          <button class="nav-btn" data-route="search">Search</button>
           <button class="nav-btn" data-route="library">Library</button>
         </div>
       </div>
@@ -558,6 +634,28 @@
         </select>
       </div>
     </header>
+
+    <!-- SEARCH SECTION -->
+    <section id="searchSection" class="section">
+      <section class="tmdb-panel">
+        <h2 class="tmdb-header">Search Results</h2>
+        <div class="tmdb-row">
+          <input
+            id="tmdbSearchInput"
+            class="tmdb-input"
+            type="search"
+            placeholder="Search TMDb (movie / show)…"
+          />
+          <button id="tmdbSearchButton" class="tmdb-button" type="button">
+            Search
+          </button>
+        </div>
+        <div id="tmdbStatus" class="tmdb-status">
+          Type a title above and click Search.
+        </div>
+        <div id="tmdbResults" class="tmdb-results"></div>
+      </section>
+    </section>
 
     <!-- HOME SECTION -->
     <section id="homeSection" class="section active">
@@ -584,26 +682,6 @@
         <span id="popularTvLabel"></span>
       </div>
       <div id="popularTvRow" class="card-row"></div>
-
-      <!-- TMDb search -->
-      <section class="tmdb-panel">
-        <h2 class="tmdb-header">TMDb Search → Add to Library</h2>
-        <div class="tmdb-row">
-          <input
-            id="tmdbSearchInput"
-            class="tmdb-input"
-            type="search"
-            placeholder="Search TMDb (movie / show)…"
-          />
-          <button id="tmdbSearchButton" class="tmdb-button" type="button">
-            Search
-          </button>
-        </div>
-        <div id="tmdbStatus" class="tmdb-status">
-          Type a title above and click Search.
-        </div>
-        <div id="tmdbResults" class="tmdb-results"></div>
-      </section>
     </section>
 
     <!-- LIBRARY SECTION -->
@@ -629,6 +707,7 @@
           <div class="player-actions">
             <button id="backHomeBtn" class="btn">← Back</button>
             <button id="watchlistToggleBtn" class="btn">Add to watchlist</button>
+            <button id="castBtn" class="btn">Cast</button>
             <button id="theaterBtn" class="btn primary">Theater mode</button>
           </div>
         </div>
@@ -669,6 +748,8 @@
     const TMDB_THUMB_BASE = "https://image.tmdb.org/t/p/w92";
     const REGION = "US";
     const STORAGE_KEY = "vidkingHubLibraryV1";
+    const CAST_SDK_URL =
+      "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
 
     let library = [];
     let popularMovies = [];
@@ -678,6 +759,15 @@
     let currentEpisode = 1;
     let episodesCache = {};
     let currentRoute = "home";
+    let playerSrcWatcher = null;
+    let lastPlayerSrc = "";
+    let lastAutoAdvanceKey = null;
+    let useEmbedAutonext = false;
+    let isCasting = false;
+    let castContext = null;
+    let castSession = null;
+    let castMedia = null;
+    let castInitPromise = null;
 
     /******************************************************************
      * STORAGE HELPERS
@@ -709,6 +799,7 @@
      ******************************************************************/
     const routeButtons = document.querySelectorAll(".nav-btn");
     const homeSection = document.getElementById("homeSection");
+    const searchSection = document.getElementById("searchSection");
     const librarySection = document.getElementById("librarySection");
     const playerSection = document.getElementById("playerSection");
 
@@ -742,16 +833,18 @@
     const seasonSelect = document.getElementById("seasonSelect");
     const backHomeBtn = document.getElementById("backHomeBtn");
     const watchlistToggleBtn = document.getElementById("watchlistToggleBtn");
+    const castBtn = document.getElementById("castBtn");
     const theaterBtn = document.getElementById("theaterBtn");
 
     /******************************************************************
      * ROUTING
      ******************************************************************/
     function setRoute(route) {
-      const leavingPlayer = (currentRoute === "player" && route !== "player");
+      const leavingPlayer = currentRoute === "player" && route !== "player";
 
       if (leavingPlayer) {
         // clear iframe so Vidking stops audio
+        stopPlayerWatcher();
         playerContainer.innerHTML = "";
         document.body.classList.remove("theater");
         theaterBtn.textContent = "Theater mode";
@@ -760,6 +853,7 @@
       currentRoute = route;
 
       homeSection.classList.remove("active");
+      searchSection.classList.remove("active");
       librarySection.classList.remove("active");
       playerSection.classList.remove("active");
 
@@ -768,6 +862,7 @@
       );
 
       if (route === "home") homeSection.classList.add("active");
+      if (route === "search") searchSection.classList.add("active");
       if (route === "library") librarySection.classList.add("active");
       if (route === "player") playerSection.classList.add("active");
     }
@@ -777,6 +872,8 @@
         setRoute(btn.dataset.route);
         if (btn.dataset.route === "library") {
           renderLibrary();
+        } else if (btn.dataset.route === "search") {
+          tmdbSearchInput?.focus();
         }
       });
     });
@@ -1134,6 +1231,7 @@
           <iframe
             src="${src}"
             frameborder="0"
+            allow="autoplay; fullscreen"
             allowfullscreen
           ></iframe>
         `;
@@ -1141,17 +1239,244 @@
         currentItem.lastEpisode = currentEpisode;
         markWatched(currentItem);
         renderPlayerDetails();
+        startPlayerWatcher();
+        pushCastIfActive(true);
       });
     }
 
     /******************************************************************
      * PLAYER
      ******************************************************************/
-    function buildVidkingUrl(item, season = 1, episode = 1) {
+    function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
+      const autoplayParams = "autoPlay=true";
       if (item.type === "movie") {
-        return `https://www.vidking.net/embed/movie/${item.tmdbId}?autoPlay=true`;
-      } else {
-        return `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}?autoPlay=true&nextEpisode=true&episodeSelector=true`;
+        return `https://www.vidking.net/embed/movie/${item.tmdbId}?${autoplayParams}`;
+      }
+
+      // Prefer our own next-episode logic, but allow the embed to handle it on TV/BrowseHere fallbacks.
+      const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
+      const params = [`${autoplayParams}`, "episodeSelector=true"];
+      const enableAutonext =
+        useEmbedAutonext || isCasting || options.forceEmbedAutonext;
+      if (enableAutonext) {
+        params.push("nextEpisode=true", "autonext=true");
+      }
+      return `${base}?${params.join("&")}`;
+    }
+
+    function stopPlayerWatcher() {
+      if (playerSrcWatcher) {
+        clearInterval(playerSrcWatcher);
+        playerSrcWatcher = null;
+      }
+    }
+
+    function syncEpisodeFromSrc(src) {
+      const match = src.match(/\/tv\/(\d+)\/(\d+)\/(\d+)/);
+      if (!match || !currentItem) return;
+
+      const [, tmdbId, seasonStr, epStr] = match;
+      if (String(tmdbId) !== String(currentItem.tmdbId)) return;
+
+      const parsedSeason = parseInt(seasonStr, 10);
+      const parsedEpisode = parseInt(epStr, 10);
+      if (Number.isFinite(parsedSeason)) currentSeason = parsedSeason;
+      if (Number.isFinite(parsedEpisode)) currentEpisode = parsedEpisode;
+
+      currentItem.lastSeason = currentSeason;
+      currentItem.lastEpisode = currentEpisode;
+      markWatched(currentItem);
+      renderEpisodeList(currentItem, currentSeason, currentEpisode);
+      renderPlayerDetails();
+    }
+
+    function startPlayerWatcher() {
+      stopPlayerWatcher();
+      const iframe = playerContainer.querySelector("iframe");
+      if (!iframe) return;
+      lastPlayerSrc = iframe.getAttribute("src") || "";
+      if (lastPlayerSrc) syncEpisodeFromSrc(lastPlayerSrc);
+
+      playerSrcWatcher = setInterval(() => {
+        const src = iframe.getAttribute("src") || "";
+        if (src && src !== lastPlayerSrc) {
+          lastPlayerSrc = src;
+          syncEpisodeFromSrc(src);
+        }
+      }, 1500);
+    }
+
+    /******************************************************************
+     * CASTING
+     ******************************************************************/
+    function loadCastSdk() {
+      if (castInitPromise) return castInitPromise;
+
+      castInitPromise = new Promise((resolve, reject) => {
+        if (window.cast && window.cast.framework) {
+          resolve();
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src = CAST_SDK_URL;
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = (err) => reject(err);
+        document.head.appendChild(script);
+      });
+
+      return castInitPromise;
+    }
+
+    async function setupCasting() {
+      if (!castBtn) return;
+      castBtn.disabled = true;
+
+      try {
+        await loadCastSdk();
+        if (!(window.cast && window.cast.framework)) {
+          throw new Error("Cast SDK not available");
+        }
+
+        castContext = cast.framework.CastContext.getInstance();
+        castContext.setOptions({
+          receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+          autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+        });
+
+        castBtn.disabled = false;
+        castBtn.title = "Cast to a wireless device";
+        castBtn.addEventListener("click", onCastButtonClick);
+
+        castContext.addEventListener(
+          cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
+          handleCastSessionState
+        );
+      } catch (e) {
+        console.warn("Casting unavailable", e);
+        castBtn.textContent = "Cast unavailable";
+      }
+    }
+
+    async function onCastButtonClick() {
+      if (!castContext) return;
+
+      if (isCasting && castSession) {
+        castSession.endSession(true);
+        return;
+      }
+
+      try {
+        await castContext.requestSession();
+      } catch (e) {
+        console.warn("Cast request failed", e);
+      }
+    }
+
+    function handleCastSessionState(event) {
+      if (!event || !castContext) return;
+      const state = event.sessionState;
+
+      if (
+        state === cast.framework.SessionState.SESSION_STARTED ||
+        state === cast.framework.SessionState.SESSION_RESUMED
+      ) {
+        castSession = castContext.getCurrentSession();
+        isCasting = true;
+        castBtn.textContent = "Casting…";
+        castBtn.classList.add("primary");
+        syncCastMediaToCurrent(true);
+      } else if (
+        state === cast.framework.SessionState.SESSION_ENDING ||
+        state === cast.framework.SessionState.SESSION_ENDED ||
+        state === cast.framework.SessionState.SESSION_START_FAILED ||
+        state === cast.framework.SessionState.NO_SESSION
+      ) {
+        isCasting = false;
+        castMedia = null;
+        castSession = null;
+        castBtn.textContent = "Cast";
+        castBtn.classList.remove("primary");
+      }
+    }
+
+    function onCastMediaUpdate(isAlive) {
+      if (!isAlive || !castMedia) return;
+
+      if (
+        castMedia.playerState === chrome.cast.media.PlayerState.IDLE &&
+        castMedia.idleReason === chrome.cast.media.IdleReason.FINISHED &&
+        currentItem &&
+        currentItem.type === "tv"
+      ) {
+        autoAdvanceEpisode(currentItem, currentSeason, currentEpisode);
+        syncCastMediaToCurrent(true);
+      }
+    }
+
+    function syncCastMediaToCurrent(forceAutonext = false) {
+      if (!isCasting || !castSession || !currentItem) return;
+      if (!(window.chrome && chrome.cast && chrome.cast.media)) return;
+
+      const src = buildVidkingUrl(currentItem, currentSeason, currentEpisode, {
+        forceEmbedAutonext: forceAutonext
+      });
+
+      const mediaInfo = new chrome.cast.media.MediaInfo(src, "text/html");
+      mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+      mediaInfo.metadata.title = currentItem.title || "Vidking";
+      if (currentItem.type === "tv") {
+        mediaInfo.metadata.subtitle =
+          "S" +
+          String(currentSeason).padStart(2, "0") +
+          "E" +
+          String(currentEpisode).padStart(2, "0");
+      } else if (currentItem.year) {
+        mediaInfo.metadata.subtitle = String(currentItem.year);
+      }
+      mediaInfo.customData = {
+        tmdbId: currentItem.tmdbId,
+        type: currentItem.type,
+        season: currentSeason,
+        episode: currentEpisode
+      };
+
+      const request = new chrome.cast.media.LoadRequest(mediaInfo);
+      request.autoplay = true;
+
+      castSession
+        .loadMedia(request)
+        .then((media) => {
+          castMedia = media;
+          if (castMedia) {
+            castMedia.addUpdateListener(onCastMediaUpdate);
+          }
+        })
+        .catch((err) => console.warn("Cast load failed", err));
+    }
+
+    function pushCastIfActive(forceAutonext = false) {
+      if (!isCasting || !castSession) return;
+      syncCastMediaToCurrent(forceAutonext);
+    }
+
+    function detectDevice() {
+      const ua = navigator.userAgent || "";
+      const isAndroidTv = /Android TV|BRAVIA|SMART-TV|HbbTV|NETTV/i.test(ua);
+      const isBrowseHere = /BrowseHere/i.test(ua);
+      const isMobile = !isAndroidTv && /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+
+      if (isAndroidTv) {
+        document.body.classList.add("tv");
+      }
+
+      if (isAndroidTv || isBrowseHere) {
+        useEmbedAutonext = true;
+      }
+
+      if (isMobile) {
+        document.body.classList.add("mobile");
       }
     }
 
@@ -1296,6 +1621,7 @@
             <iframe
               src="${src}"
               frameborder="0"
+              allow="autoplay; fullscreen"
               allowfullscreen
             ></iframe>
           `;
@@ -1303,10 +1629,56 @@
           item.lastEpisode = currentEpisode;
           markWatched(item);
           renderPlayerDetails();
+          startPlayerWatcher();
+          pushCastIfActive(true);
         });
 
         episodeList.appendChild(row);
       });
+    }
+
+    function autoAdvanceEpisode(item, season, episode) {
+      if (!item || item.type !== "tv") return;
+      const s = Number(season) || 1;
+      const e = Number(episode) || 1;
+
+      const key = `${item.type}-${item.tmdbId}-s${s}-e${e}`;
+      // Prevent double-triggering on repeated events from the same episode
+      if (lastAutoAdvanceKey === key) return;
+      lastAutoAdvanceKey = key;
+
+      (async () => {
+        const eps = await loadEpisodes(item, s);
+        if (!eps.length) return;
+
+        const idx = eps.findIndex((ep) => ep.episode_number === e);
+        if (idx === -1 || idx === eps.length - 1) {
+          // Last episode in the season → don’t auto-jump to next season for now
+          return;
+        }
+
+        const nextEpNum = eps[idx + 1].episode_number;
+
+        currentItem = item;
+        currentSeason = s;
+        currentEpisode = nextEpNum;
+
+        const src = buildVidkingUrl(item, currentSeason, currentEpisode);
+        playerContainer.innerHTML = `
+          <iframe
+            src="${src}"
+            frameborder="0"
+            allow="autoplay; fullscreen"
+            allowfullscreen
+          ></iframe>
+        `;
+
+        item.lastSeason = currentSeason;
+        item.lastEpisode = currentEpisode;
+        markWatched(item);
+        renderPlayerDetails();
+        pushCastIfActive(true);
+      })();
     }
 
     function openPlayer(item, { fromRoute }) {
@@ -1326,12 +1698,15 @@
         <iframe
           src="${src}"
           frameborder="0"
+          allow="autoplay; fullscreen"
           allowfullscreen
         ></iframe>
       `;
 
       markWatched(item);
       renderPlayerDetails();
+      startPlayerWatcher();
+      pushCastIfActive(true);
       setRoute("player");
       window.scrollTo({ top: 0, behavior: "smooth" });
 
@@ -1393,6 +1768,7 @@
 
       const mediaType = info.mediaType === "tv" ? "tv" : "movie";
       const tmdbId = String(info.id);
+      const eventType = info.eventType || info.type || null;
 
       const item = library.find(
         (x) => x.type === mediaType && String(x.tmdbId) === tmdbId
@@ -1412,6 +1788,38 @@
         if (info.episode) item.lastEpisode = info.episode;
       }
 
+      // Decide if this episode is effectively finished
+      const progress = typeof info.progress === "number" ? info.progress : null;
+      const duration = typeof info.duration === "number" ? info.duration : null;
+      const currentTime =
+        typeof info.currentTime === "number"
+          ? info.currentTime
+          : typeof info.timestamp === "number"
+          ? info.timestamp
+          : null;
+
+      const nearEndByProgress = progress !== null && progress >= 98;
+      const nearEndByTime =
+        duration !== null &&
+        currentTime !== null &&
+        duration > 0 &&
+        duration - currentTime <= 5; // within 5 seconds of the end
+
+      const isTv = mediaType === "tv";
+      const hasEpisodeInfo = info.season != null && info.episode != null;
+
+      // Prefer the explicit "ended" event, but also handle platforms that never fire it
+      if (
+        isTv &&
+        hasEpisodeInfo &&
+        (
+          eventType === "ended" ||
+          eventType === "timeupdate" && (nearEndByProgress || nearEndByTime)
+        )
+      ) {
+        autoAdvanceEpisode(item, info.season, info.episode);
+      }
+
       saveLibrary();
       renderHome();
       renderLibrary();
@@ -1424,6 +1832,8 @@
      ******************************************************************/
     async function searchTmdb(query) {
       const q = query.trim();
+      setRoute("search");
+
       if (!q) {
         tmdbStatusEl.textContent = "Type a title to search TMDb.";
         tmdbResultsEl.innerHTML = "";
@@ -1436,6 +1846,7 @@
         return;
       }
 
+      window.scrollTo({ top: 0, behavior: "smooth" });
       tmdbStatusEl.textContent = "Searching TMDb…";
       tmdbResultsEl.innerHTML = "";
 
@@ -1519,7 +1930,7 @@
           : "Add show to library";
         addBtn.addEventListener("click", () => {
           const item = addToLibraryFromTmdbResult(r, isMovie);
-          openPlayer(item, { fromRoute: "home" });
+          openPlayer(item, { fromRoute: "search" });
         });
 
         actions.appendChild(addBtn);
@@ -1534,14 +1945,14 @@
           const item = addToLibraryFromTmdbResult(r, isMovie, {
             makeWatchlist: true
           });
-          if (!item.isWatchlist) {
-            item.isWatchlist = true;
-            saveLibrary();
-          }
-          renderHome();
-          renderLibrary();
-          openPlayer(item, { fromRoute: "home" });
-        });
+            if (!item.isWatchlist) {
+              item.isWatchlist = true;
+              saveLibrary();
+            }
+            renderHome();
+            renderLibrary();
+            openPlayer(item, { fromRoute: "search" });
+          });
 
         actions.appendChild(watchlistBtn);
         body.appendChild(actions);
@@ -1603,6 +2014,8 @@
      * INIT
      ******************************************************************/
     function init() {
+      detectDevice();
+      setupCasting();
       loadLibraryFromStorage();
       renderLibrary();
       renderHome();
