@@ -707,6 +707,7 @@
           <div class="player-actions">
             <button id="backHomeBtn" class="btn">← Back</button>
             <button id="watchlistToggleBtn" class="btn">Add to watchlist</button>
+            <button id="castBtn" class="btn">Cast</button>
             <button id="theaterBtn" class="btn primary">Theater mode</button>
           </div>
         </div>
@@ -747,6 +748,8 @@
     const TMDB_THUMB_BASE = "https://image.tmdb.org/t/p/w92";
     const REGION = "US";
     const STORAGE_KEY = "vidkingHubLibraryV1";
+    const CAST_SDK_URL =
+      "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
 
     let library = [];
     let popularMovies = [];
@@ -759,6 +762,12 @@
     let playerSrcWatcher = null;
     let lastPlayerSrc = "";
     let lastAutoAdvanceKey = null;
+    let useEmbedAutonext = false;
+    let isCasting = false;
+    let castContext = null;
+    let castSession = null;
+    let castMedia = null;
+    let castInitPromise = null;
 
     /******************************************************************
      * STORAGE HELPERS
@@ -824,6 +833,7 @@
     const seasonSelect = document.getElementById("seasonSelect");
     const backHomeBtn = document.getElementById("backHomeBtn");
     const watchlistToggleBtn = document.getElementById("watchlistToggleBtn");
+    const castBtn = document.getElementById("castBtn");
     const theaterBtn = document.getElementById("theaterBtn");
 
     /******************************************************************
@@ -1221,6 +1231,7 @@
           <iframe
             src="${src}"
             frameborder="0"
+            allow="autoplay; fullscreen"
             allowfullscreen
           ></iframe>
         `;
@@ -1229,21 +1240,28 @@
         markWatched(currentItem);
         renderPlayerDetails();
         startPlayerWatcher();
+        pushCastIfActive(true);
       });
     }
 
     /******************************************************************
      * PLAYER
      ******************************************************************/
-    function buildVidkingUrl(item, season = 1, episode = 1) {
+    function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
       const autoplayParams = "autoPlay=true";
       if (item.type === "movie") {
         return `https://www.vidking.net/embed/movie/${item.tmdbId}?${autoplayParams}`;
       }
 
-      // Let our own script handle next-episode logic. Still enable the episode selector in the player UI.
+      // Prefer our own next-episode logic, but allow the embed to handle it on TV/BrowseHere fallbacks.
       const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
-      return `${base}?${autoplayParams}&episodeSelector=true`;
+      const params = [`${autoplayParams}`, "episodeSelector=true"];
+      const enableAutonext =
+        useEmbedAutonext || isCasting || options.forceEmbedAutonext;
+      if (enableAutonext) {
+        params.push("nextEpisode=true", "autonext=true");
+      }
+      return `${base}?${params.join("&")}`;
     }
 
     function stopPlayerWatcher() {
@@ -1288,13 +1306,173 @@
       }, 1500);
     }
 
+    /******************************************************************
+     * CASTING
+     ******************************************************************/
+    function loadCastSdk() {
+      if (castInitPromise) return castInitPromise;
+
+      castInitPromise = new Promise((resolve, reject) => {
+        if (window.cast && window.cast.framework) {
+          resolve();
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src = CAST_SDK_URL;
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = (err) => reject(err);
+        document.head.appendChild(script);
+      });
+
+      return castInitPromise;
+    }
+
+    async function setupCasting() {
+      if (!castBtn) return;
+      castBtn.disabled = true;
+
+      try {
+        await loadCastSdk();
+        if (!(window.cast && window.cast.framework)) {
+          throw new Error("Cast SDK not available");
+        }
+
+        castContext = cast.framework.CastContext.getInstance();
+        castContext.setOptions({
+          receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+          autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+        });
+
+        castBtn.disabled = false;
+        castBtn.title = "Cast to a wireless device";
+        castBtn.addEventListener("click", onCastButtonClick);
+
+        castContext.addEventListener(
+          cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
+          handleCastSessionState
+        );
+      } catch (e) {
+        console.warn("Casting unavailable", e);
+        castBtn.textContent = "Cast unavailable";
+      }
+    }
+
+    async function onCastButtonClick() {
+      if (!castContext) return;
+
+      if (isCasting && castSession) {
+        castSession.endSession(true);
+        return;
+      }
+
+      try {
+        await castContext.requestSession();
+      } catch (e) {
+        console.warn("Cast request failed", e);
+      }
+    }
+
+    function handleCastSessionState(event) {
+      if (!event || !castContext) return;
+      const state = event.sessionState;
+
+      if (
+        state === cast.framework.SessionState.SESSION_STARTED ||
+        state === cast.framework.SessionState.SESSION_RESUMED
+      ) {
+        castSession = castContext.getCurrentSession();
+        isCasting = true;
+        castBtn.textContent = "Casting…";
+        castBtn.classList.add("primary");
+        syncCastMediaToCurrent(true);
+      } else if (
+        state === cast.framework.SessionState.SESSION_ENDING ||
+        state === cast.framework.SessionState.SESSION_ENDED ||
+        state === cast.framework.SessionState.SESSION_START_FAILED ||
+        state === cast.framework.SessionState.NO_SESSION
+      ) {
+        isCasting = false;
+        castMedia = null;
+        castSession = null;
+        castBtn.textContent = "Cast";
+        castBtn.classList.remove("primary");
+      }
+    }
+
+    function onCastMediaUpdate(isAlive) {
+      if (!isAlive || !castMedia) return;
+
+      if (
+        castMedia.playerState === chrome.cast.media.PlayerState.IDLE &&
+        castMedia.idleReason === chrome.cast.media.IdleReason.FINISHED &&
+        currentItem &&
+        currentItem.type === "tv"
+      ) {
+        autoAdvanceEpisode(currentItem, currentSeason, currentEpisode);
+        syncCastMediaToCurrent(true);
+      }
+    }
+
+    function syncCastMediaToCurrent(forceAutonext = false) {
+      if (!isCasting || !castSession || !currentItem) return;
+      if (!(window.chrome && chrome.cast && chrome.cast.media)) return;
+
+      const src = buildVidkingUrl(currentItem, currentSeason, currentEpisode, {
+        forceEmbedAutonext: forceAutonext
+      });
+
+      const mediaInfo = new chrome.cast.media.MediaInfo(src, "text/html");
+      mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+      mediaInfo.metadata.title = currentItem.title || "Vidking";
+      if (currentItem.type === "tv") {
+        mediaInfo.metadata.subtitle =
+          "S" +
+          String(currentSeason).padStart(2, "0") +
+          "E" +
+          String(currentEpisode).padStart(2, "0");
+      } else if (currentItem.year) {
+        mediaInfo.metadata.subtitle = String(currentItem.year);
+      }
+      mediaInfo.customData = {
+        tmdbId: currentItem.tmdbId,
+        type: currentItem.type,
+        season: currentSeason,
+        episode: currentEpisode
+      };
+
+      const request = new chrome.cast.media.LoadRequest(mediaInfo);
+      request.autoplay = true;
+
+      castSession
+        .loadMedia(request)
+        .then((media) => {
+          castMedia = media;
+          if (castMedia) {
+            castMedia.addUpdateListener(onCastMediaUpdate);
+          }
+        })
+        .catch((err) => console.warn("Cast load failed", err));
+    }
+
+    function pushCastIfActive(forceAutonext = false) {
+      if (!isCasting || !castSession) return;
+      syncCastMediaToCurrent(forceAutonext);
+    }
+
     function detectDevice() {
       const ua = navigator.userAgent || "";
       const isAndroidTv = /Android TV|BRAVIA|SMART-TV|HbbTV|NETTV/i.test(ua);
+      const isBrowseHere = /BrowseHere/i.test(ua);
       const isMobile = !isAndroidTv && /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
 
       if (isAndroidTv) {
         document.body.classList.add("tv");
+      }
+
+      if (isAndroidTv || isBrowseHere) {
+        useEmbedAutonext = true;
       }
 
       if (isMobile) {
@@ -1443,6 +1621,7 @@
             <iframe
               src="${src}"
               frameborder="0"
+              allow="autoplay; fullscreen"
               allowfullscreen
             ></iframe>
           `;
@@ -1451,10 +1630,55 @@
           markWatched(item);
           renderPlayerDetails();
           startPlayerWatcher();
+          pushCastIfActive(true);
         });
 
         episodeList.appendChild(row);
       });
+    }
+
+    function autoAdvanceEpisode(item, season, episode) {
+      if (!item || item.type !== "tv") return;
+      const s = Number(season) || 1;
+      const e = Number(episode) || 1;
+
+      const key = `${item.type}-${item.tmdbId}-s${s}-e${e}`;
+      // Prevent double-triggering on repeated events from the same episode
+      if (lastAutoAdvanceKey === key) return;
+      lastAutoAdvanceKey = key;
+
+      (async () => {
+        const eps = await loadEpisodes(item, s);
+        if (!eps.length) return;
+
+        const idx = eps.findIndex((ep) => ep.episode_number === e);
+        if (idx === -1 || idx === eps.length - 1) {
+          // Last episode in the season → don’t auto-jump to next season for now
+          return;
+        }
+
+        const nextEpNum = eps[idx + 1].episode_number;
+
+        currentItem = item;
+        currentSeason = s;
+        currentEpisode = nextEpNum;
+
+        const src = buildVidkingUrl(item, currentSeason, currentEpisode);
+        playerContainer.innerHTML = `
+          <iframe
+            src="${src}"
+            frameborder="0"
+            allow="autoplay; fullscreen"
+            allowfullscreen
+          ></iframe>
+        `;
+
+        item.lastSeason = currentSeason;
+        item.lastEpisode = currentEpisode;
+        markWatched(item);
+        renderPlayerDetails();
+        pushCastIfActive(true);
+      })();
     }
 
     function autoAdvanceEpisode(item, season, episode) {
@@ -1516,6 +1740,7 @@
         <iframe
           src="${src}"
           frameborder="0"
+          allow="autoplay; fullscreen"
           allowfullscreen
         ></iframe>
       `;
@@ -1523,6 +1748,7 @@
       markWatched(item);
       renderPlayerDetails();
       startPlayerWatcher();
+      pushCastIfActive(true);
       setRoute("player");
       window.scrollTo({ top: 0, behavior: "smooth" });
 
@@ -1831,6 +2057,7 @@
      ******************************************************************/
     function init() {
       detectDevice();
+      setupCasting();
       loadLibraryFromStorage();
       renderLibrary();
       renderHome();
