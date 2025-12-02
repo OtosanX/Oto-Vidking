@@ -298,10 +298,6 @@
       margin-bottom: 0.75rem;
     }
 
-    .player-wrapper.is-sized {
-      padding-top: 0;
-    }
-
     body.theater .player-wrapper {
       position: relative;
       width: 100%;
@@ -310,10 +306,6 @@
       max-height: calc(100vh - 120px);
       border-radius: 0;
       margin: 0 auto 0.75rem;
-    }
-
-    body.theater .player-wrapper.is-sized {
-      padding-top: 0;
     }
 
     .player-wrapper iframe {
@@ -770,6 +762,7 @@
     let playerSrcWatcher = null;
     let lastPlayerSrc = "";
     let lastAutoAdvanceKey = null;
+    let useEmbedAutonext = false;
     let isCasting = false;
     let castContext = null;
     let castSession = null;
@@ -872,10 +865,6 @@
       if (route === "search") searchSection.classList.add("active");
       if (route === "library") librarySection.classList.add("active");
       if (route === "player") playerSection.classList.add("active");
-
-      if (route === "player") {
-        resizePlayerWrapper();
-      }
     }
 
     routeButtons.forEach((btn) => {
@@ -888,8 +877,6 @@
         }
       });
     });
-
-    window.addEventListener("resize", resizePlayerWrapper);
 
     /******************************************************************
      * LIBRARY / STATE HELPERS
@@ -1239,15 +1226,7 @@
         currentSeason = val;
         currentEpisode = 1;
 
-        const src = buildVidplusUrl({
-          type: currentItem.type,
-          tmdbId: currentItem.tmdbId,
-          anilistId: currentItem.anilistId,
-          season: currentSeason,
-          episode: currentEpisode,
-          episodeNumber: currentEpisode,
-          isDub: currentItem.isDub
-        });
+        const src = buildVidkingUrl(currentItem, currentSeason, currentEpisode);
         playerContainer.innerHTML = `
           <iframe
             src="${src}"
@@ -1256,93 +1235,33 @@
             allowfullscreen
           ></iframe>
         `;
-        resizePlayerWrapper();
         currentItem.lastSeason = currentSeason;
         currentItem.lastEpisode = currentEpisode;
         markWatched(currentItem);
         renderPlayerDetails();
         startPlayerWatcher();
-        pushCastIfActive();
+        pushCastIfActive(true);
       });
     }
 
     /******************************************************************
      * PLAYER
      ******************************************************************/
-    const VIDPLUS_BASE = "https://player.vidplus.to/embed";
-    const VIDPLUS_DEFAULT_PARAMS = {
-      primarycolor: "E57373",
-      secondarycolor: "4A4A4A",
-      iconcolor: "FFFFFF",
-      autoplay: "true",
-      autonext: "true",
-      nextbutton: "true",
-      fontcolor: "FFFFFF",
-      fontsize: "16",
-      opacity: "0.75",
-      poster: "true",
-      title: "true",
-      icons: "vid",
-      watchparty: "true",
-      chromecast: "false",
-      episodelist: "true",
-      servericon: "false",
-      server: "14"
-    };
-
-    function buildVidplusUrl(meta = {}) {
-      if (!meta || !meta.type) return "";
-
-      const type = meta.type;
-      let base = VIDPLUS_BASE;
-      const params = new URLSearchParams();
-
-      if (type === "movie") {
-        if (!meta.tmdbId) return "";
-        base += `/movie/${meta.tmdbId}`;
-      } else if (type === "tv") {
-        if (!meta.tmdbId) return "";
-        const season = Number(meta.season || meta.lastSeason || 1) || 1;
-        const episode =
-          Number(meta.episode || meta.episodeNumber || meta.lastEpisode || 1) || 1;
-        base += `/tv/${meta.tmdbId}/${season}/${episode}`;
-      } else if (type === "anime") {
-        if (!meta.anilistId) return "";
-        const episode = Number(meta.episode || meta.episodeNumber || 1) || 1;
-        base += `/anime/${meta.anilistId}/${episode}`;
-        params.set("dub", meta.isDub ? "true" : "false");
-      } else {
-        return "";
+    function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
+      const autoplayParams = "autoPlay=true";
+      if (item.type === "movie") {
+        return `https://www.vidking.net/embed/movie/${item.tmdbId}?${autoplayParams}`;
       }
 
-      const mergedParams = { ...VIDPLUS_DEFAULT_PARAMS };
-
-      Object.entries(mergedParams).forEach(([key, value]) =>
-        params.set(key, String(value))
-      );
-
-      return `${base}?${params.toString()}`;
-    }
-
-    function getAvailablePlayerHeight() {
-      const basePadding = document.body.classList.contains("theater") ? 120 : 220;
-      return Math.max(200, window.innerHeight - basePadding);
-    }
-
-    function resizePlayerWrapper() {
-      if (!playerContainer) return;
-      const rect = playerContainer.getBoundingClientRect();
-      const width = rect.width || playerContainer.clientWidth || window.innerWidth;
-      const desiredHeight = width * (9 / 16);
-      const availableHeight = getAvailablePlayerHeight();
-      const finalHeight = Math.min(
-        Number.isFinite(desiredHeight) && desiredHeight > 0 ? desiredHeight : availableHeight,
-        availableHeight
-      );
-
-      playerContainer.classList.add("is-sized");
-      playerContainer.style.height = `${finalHeight}px`;
-      playerContainer.style.maxHeight = `${availableHeight}px`;
+      // Prefer our own next-episode logic, but allow the embed to handle it on TV/BrowseHere fallbacks.
+      const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
+      const params = [`${autoplayParams}`, "episodeSelector=true"];
+      const enableAutonext =
+        useEmbedAutonext || isCasting || options.forceEmbedAutonext;
+      if (enableAutonext) {
+        params.push("nextEpisode=true", "autonext=true");
+      }
+      return `${base}?${params.join("&")}`;
     }
 
     function stopPlayerWatcher() {
@@ -1467,7 +1386,7 @@
         isCasting = true;
         castBtn.textContent = "Casting…";
         castBtn.classList.add("primary");
-        syncCastMediaToCurrent();
+        syncCastMediaToCurrent(true);
       } else if (
         state === cast.framework.SessionState.SESSION_ENDING ||
         state === cast.framework.SessionState.SESSION_ENDED ||
@@ -1492,22 +1411,16 @@
         currentItem.type === "tv"
       ) {
         autoAdvanceEpisode(currentItem, currentSeason, currentEpisode);
-        syncCastMediaToCurrent();
+        syncCastMediaToCurrent(true);
       }
     }
 
-    function syncCastMediaToCurrent() {
+    function syncCastMediaToCurrent(forceAutonext = false) {
       if (!isCasting || !castSession || !currentItem) return;
       if (!(window.chrome && chrome.cast && chrome.cast.media)) return;
 
-      const src = buildVidplusUrl({
-        type: currentItem.type,
-        tmdbId: currentItem.tmdbId,
-        anilistId: currentItem.anilistId,
-        season: currentSeason,
-        episode: currentEpisode,
-        episodeNumber: currentEpisode,
-        isDub: currentItem.isDub
+      const src = buildVidkingUrl(currentItem, currentSeason, currentEpisode, {
+        forceEmbedAutonext: forceAutonext
       });
 
       const mediaInfo = new chrome.cast.media.MediaInfo(src, "text/html");
@@ -1543,15 +1456,24 @@
         .catch((err) => console.warn("Cast load failed", err));
     }
 
-    function pushCastIfActive() {
+    function pushCastIfActive(forceAutonext = false) {
       if (!isCasting || !castSession) return;
-      syncCastMediaToCurrent();
+      syncCastMediaToCurrent(forceAutonext);
     }
 
     function detectDevice() {
       const ua = navigator.userAgent || "";
       const isAndroidTv = /Android TV|BRAVIA|SMART-TV|HbbTV|NETTV/i.test(ua);
+      const isBrowseHere = /BrowseHere/i.test(ua);
       const isMobile = !isAndroidTv && /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+
+      if (isAndroidTv) {
+        document.body.classList.add("tv");
+      }
+
+      if (isAndroidTv || isBrowseHere) {
+        useEmbedAutonext = true;
+      }
 
       if (isMobile) {
         document.body.classList.add("mobile");
@@ -1694,15 +1616,7 @@
         row.addEventListener("click", () => {
           currentSeason = season;
           currentEpisode = ep.episode_number;
-          const src = buildVidplusUrl({
-            type: item.type,
-            tmdbId: item.tmdbId,
-            anilistId: item.anilistId,
-            season: currentSeason,
-            episode: currentEpisode,
-            episodeNumber: currentEpisode,
-            isDub: item.isDub
-          });
+          const src = buildVidkingUrl(item, currentSeason, currentEpisode);
           playerContainer.innerHTML = `
             <iframe
               src="${src}"
@@ -1711,13 +1625,12 @@
               allowfullscreen
             ></iframe>
           `;
-          resizePlayerWrapper();
           item.lastSeason = currentSeason;
           item.lastEpisode = currentEpisode;
           markWatched(item);
           renderPlayerDetails();
           startPlayerWatcher();
-          pushCastIfActive();
+          pushCastIfActive(true);
         });
 
         episodeList.appendChild(row);
@@ -1750,15 +1663,7 @@
         currentSeason = s;
         currentEpisode = nextEpNum;
 
-        const src = buildVidplusUrl({
-          type: item.type,
-          tmdbId: item.tmdbId,
-          anilistId: item.anilistId,
-          season: currentSeason,
-          episode: currentEpisode,
-          episodeNumber: currentEpisode,
-          isDub: item.isDub
-        });
+        const src = buildVidkingUrl(item, currentSeason, currentEpisode);
         playerContainer.innerHTML = `
           <iframe
             src="${src}"
@@ -1768,12 +1673,53 @@
           ></iframe>
         `;
 
-        resizePlayerWrapper();
         item.lastSeason = currentSeason;
         item.lastEpisode = currentEpisode;
         markWatched(item);
         renderPlayerDetails();
-        pushCastIfActive();
+        pushCastIfActive(true);
+      })();
+    }
+
+    function autoAdvanceEpisode(item, season, episode) {
+      if (!item || item.type !== "tv") return;
+      const s = Number(season) || 1;
+      const e = Number(episode) || 1;
+
+      const key = `${item.type}-${item.tmdbId}-s${s}-e${e}`;
+      // Prevent double-triggering on repeated events from the same episode
+      if (lastAutoAdvanceKey === key) return;
+      lastAutoAdvanceKey = key;
+
+      (async () => {
+        const eps = await loadEpisodes(item, s);
+        if (!eps.length) return;
+
+        const idx = eps.findIndex((ep) => ep.episode_number === e);
+        if (idx === -1 || idx === eps.length - 1) {
+          // Last episode in the season → don’t auto-jump to next season for now
+          return;
+        }
+
+        const nextEpNum = eps[idx + 1].episode_number;
+
+        currentItem = item;
+        currentSeason = s;
+        currentEpisode = nextEpNum;
+
+        const src = buildVidkingUrl(item, currentSeason, currentEpisode);
+        playerContainer.innerHTML = `
+          <iframe
+            src="${src}"
+            frameborder="0"
+            allowfullscreen
+          ></iframe>
+        `;
+
+        item.lastSeason = currentSeason;
+        item.lastEpisode = currentEpisode;
+        markWatched(item);
+        renderPlayerDetails();
       })();
     }
 
@@ -1789,15 +1735,7 @@
         currentEpisode = 1;
       }
 
-      const src = buildVidplusUrl({
-        type: item.type,
-        tmdbId: item.tmdbId,
-        anilistId: item.anilistId,
-        season: currentSeason,
-        episode: currentEpisode,
-        episodeNumber: currentEpisode,
-        isDub: item.isDub
-      });
+      const src = buildVidkingUrl(item, currentSeason, currentEpisode);
       playerContainer.innerHTML = `
         <iframe
           src="${src}"
@@ -1807,11 +1745,10 @@
         ></iframe>
       `;
 
-      resizePlayerWrapper();
       markWatched(item);
       renderPlayerDetails();
       startPlayerWatcher();
-      pushCastIfActive();
+      pushCastIfActive(true);
       setRoute("player");
       window.scrollTo({ top: 0, behavior: "smooth" });
 
