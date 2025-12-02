@@ -762,6 +762,7 @@
     let playerSrcWatcher = null;
     let lastPlayerSrc = "";
     let lastAutoAdvanceKey = null;
+    let useEmbedAutonext = false;
     let isCasting = false;
     let castContext = null;
     let castSession = null;
@@ -1252,10 +1253,13 @@
         return `https://www.vidking.net/embed/movie/${item.tmdbId}?${autoplayParams}`;
       }
 
+      // Prefer our own next-episode logic, but allow the embed to handle it on TV/BrowseHere fallbacks.
       const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
-      const params = [autoplayParams, "episodeSelector=true"];
-      if (isCasting || options.forceEmbedAutonext) {
-        params.push("nextEpisode=true");
+      const params = [`${autoplayParams}`, "episodeSelector=true"];
+      const enableAutonext =
+        useEmbedAutonext || isCasting || options.forceEmbedAutonext;
+      if (enableAutonext) {
+        params.push("nextEpisode=true", "autonext=true");
       }
       return `${base}?${params.join("&")}`;
     }
@@ -1460,7 +1464,16 @@
     function detectDevice() {
       const ua = navigator.userAgent || "";
       const isAndroidTv = /Android TV|BRAVIA|SMART-TV|HbbTV|NETTV/i.test(ua);
+      const isBrowseHere = /BrowseHere/i.test(ua);
       const isMobile = !isAndroidTv && /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+
+      if (isAndroidTv) {
+        document.body.classList.add("tv");
+      }
+
+      if (isAndroidTv || isBrowseHere) {
+        useEmbedAutonext = true;
+      }
 
       if (isMobile) {
         document.body.classList.add("mobile");
@@ -1665,6 +1678,48 @@
         markWatched(item);
         renderPlayerDetails();
         pushCastIfActive(true);
+      })();
+    }
+
+    function autoAdvanceEpisode(item, season, episode) {
+      if (!item || item.type !== "tv") return;
+      const s = Number(season) || 1;
+      const e = Number(episode) || 1;
+
+      const key = `${item.type}-${item.tmdbId}-s${s}-e${e}`;
+      // Prevent double-triggering on repeated events from the same episode
+      if (lastAutoAdvanceKey === key) return;
+      lastAutoAdvanceKey = key;
+
+      (async () => {
+        const eps = await loadEpisodes(item, s);
+        if (!eps.length) return;
+
+        const idx = eps.findIndex((ep) => ep.episode_number === e);
+        if (idx === -1 || idx === eps.length - 1) {
+          // Last episode in the season → don’t auto-jump to next season for now
+          return;
+        }
+
+        const nextEpNum = eps[idx + 1].episode_number;
+
+        currentItem = item;
+        currentSeason = s;
+        currentEpisode = nextEpNum;
+
+        const src = buildVidkingUrl(item, currentSeason, currentEpisode);
+        playerContainer.innerHTML = `
+          <iframe
+            src="${src}"
+            frameborder="0"
+            allowfullscreen
+          ></iframe>
+        `;
+
+        item.lastSeason = currentSeason;
+        item.lastEpisode = currentEpisode;
+        markWatched(item);
+        renderPlayerDetails();
       })();
     }
 
