@@ -317,27 +317,17 @@
     }
 
     #playerBottomRow {
-      display: grid;
-      grid-template-columns: minmax(0, 2.2fr) minmax(0, 2.3fr);
-      gap: 0.75rem;
+      margin-top: 0.75rem;
     }
 
-    @media (max-width: 900px) {
-      #playerBottomRow {
-        grid-template-columns: minmax(0,1fr);
-      }
-    }
-
-    #descriptionPanel,
-    #episodePanel {
+    #descriptionPanel {
       background: linear-gradient(145deg, var(--card-bg), #020617);
       border-radius: 0.9rem;
       border: 1px solid var(--border);
       padding: 0.75rem;
     }
 
-    #descriptionPanel h3,
-    #episodePanel h3 {
+    #descriptionPanel h3 {
       margin: 0 0 0.4rem;
       font-size: 0.95rem;
       text-transform: uppercase;
@@ -354,47 +344,6 @@
       font-size: 0.8rem;
       color: var(--muted);
       margin-top: 0.4rem;
-    }
-
-    #episodeList {
-      max-height: 260px;
-      overflow: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0.3rem;
-      font-size: 0.8rem;
-    }
-
-    .episode-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 0.4rem;
-      padding: 0.25rem 0.5rem;
-      border-radius: 0.5rem;
-      cursor: pointer;
-      border: 1px solid transparent;
-      background: rgba(15,23,42,0.85);
-    }
-
-    .episode-row:hover {
-      border-color: var(--border);
-    }
-
-    .episode-row.active {
-      border-color: var(--accent);
-      background: rgba(37,99,235,0.25);
-    }
-
-    .episode-title {
-      flex: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .episode-meta {
-      color: var(--muted);
-      margin-left: 0.25rem;
     }
 
     /* TMDb search panel */
@@ -720,15 +669,6 @@
             <div id="descriptionText">Pick something from Home or Library to play.</div>
             <div id="descMeta"></div>
           </div>
-          <div id="episodePanel">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
-              <h3 style="margin:0;">Episodes</h3>
-              <select id="seasonSelect" class="select-input" style="max-width:160px;">
-                <option value="1">Season 1</option>
-              </select>
-            </div>
-            <div id="episodeList">No episodes (movies won’t show a list).</div>
-          </div>
         </div>
       </div>
     </section>
@@ -757,11 +697,9 @@
     let currentItem = null;
     let currentSeason = 1;
     let currentEpisode = 1;
-    let episodesCache = {};
     let currentRoute = "home";
     let playerSrcWatcher = null;
     let lastPlayerSrc = "";
-    let lastAutoAdvanceKey = null;
     let useEmbedAutonext = false;
     let isCasting = false;
     let castContext = null;
@@ -829,8 +767,6 @@
     const playerContainer = document.getElementById("playerContainer");
     const descriptionText = document.getElementById("descriptionText");
     const descMeta = document.getElementById("descMeta");
-    const episodeList = document.getElementById("episodeList");
-    const seasonSelect = document.getElementById("seasonSelect");
     const backHomeBtn = document.getElementById("backHomeBtn");
     const watchlistToggleBtn = document.getElementById("watchlistToggleBtn");
     const castBtn = document.getElementById("castBtn");
@@ -1218,25 +1154,6 @@
       renderLibrary();
     });
 
-    if (seasonSelect) {
-      seasonSelect.addEventListener("change", () => {
-        if (!currentItem || currentItem.type !== "tv") return;
-        const val = parseInt(seasonSelect.value, 10);
-        if (!val || val < 1) return;
-        currentSeason = val;
-        currentEpisode = 1;
-
-        const src = buildVidkingUrl(currentItem, currentSeason, currentEpisode);
-        renderPlayerIframe(src);
-        currentItem.lastSeason = currentSeason;
-        currentItem.lastEpisode = currentEpisode;
-        markWatched(currentItem);
-        renderPlayerDetails();
-        startPlayerWatcher();
-        pushCastIfActive(true);
-      });
-    }
-
     /******************************************************************
      * PLAYER
      ******************************************************************/
@@ -1292,7 +1209,6 @@
       currentItem.lastSeason = currentSeason;
       currentItem.lastEpisode = currentEpisode;
       markWatched(currentItem);
-      renderEpisodeList(currentItem, currentSeason, currentEpisode);
       renderPlayerDetails();
     }
 
@@ -1409,16 +1325,6 @@
 
     function onCastMediaUpdate(isAlive) {
       if (!isAlive || !castMedia) return;
-
-      if (
-        castMedia.playerState === chrome.cast.media.PlayerState.IDLE &&
-        castMedia.idleReason === chrome.cast.media.IdleReason.FINISHED &&
-        currentItem &&
-        currentItem.type === "tv"
-      ) {
-        autoAdvanceEpisode(currentItem, currentSeason, currentEpisode);
-        syncCastMediaToCurrent(true);
-      }
     }
 
     function syncCastMediaToCurrent(forceAutonext = false) {
@@ -1499,8 +1405,6 @@
         descriptionText.textContent =
           "Pick something from Home or Library to play.";
         descMeta.textContent = "";
-        episodeList.innerHTML = "No episodes.";
-        if (seasonSelect) seasonSelect.style.display = "none";
         return;
       }
 
@@ -1513,214 +1417,7 @@
           ? ` • Season ${currentSeason}, Episode ${currentEpisode}`
           : "");
 
-      if (currentItem.type === "movie") {
-        episodeList.innerHTML =
-          "Movies don’t show episodes. Use the player controls above.";
-        if (seasonSelect) seasonSelect.style.display = "none";
-      } else {
-        if (seasonSelect) {
-          seasonSelect.style.display = "inline-block";
-          seasonSelect.value = String(currentSeason);
-        }
-        loadSeasons(currentItem);
-        renderEpisodeList(currentItem, currentSeason, currentEpisode);
-      }
-
       updateWatchlistButton();
-    }
-
-    async function loadSeasons(item) {
-      if (!seasonSelect || item.type !== "tv") return;
-      if (!TMDB_API_KEY || TMDB_API_KEY === "REPLACE_WITH_YOUR_TMDB_KEY") return;
-
-      try {
-        const url =
-          `${TMDB_API_BASE}/tv/${item.tmdbId}` +
-          `?api_key=${encodeURIComponent(TMDB_API_KEY)}&language=en-US`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        const seasons = (data.seasons || [])
-          .filter((s) => s.season_number > 0)
-          .sort((a, b) => a.season_number - b.season_number);
-
-        seasonSelect.innerHTML = "";
-        seasons.forEach((s) => {
-          const opt = document.createElement("option");
-          opt.value = s.season_number;
-          opt.textContent = `Season ${s.season_number}`;
-          seasonSelect.appendChild(opt);
-        });
-
-        if (seasons.some((s) => s.season_number === currentSeason)) {
-          seasonSelect.value = String(currentSeason);
-        } else if (seasons.length) {
-          currentSeason = seasons[0].season_number;
-          seasonSelect.value = String(currentSeason);
-        }
-      } catch (e) {
-        console.error("loadSeasons error", e);
-      }
-    }
-
-    async function loadEpisodes(item, season) {
-      const key = `${item.tmdbId}-s${season}`;
-      if (episodesCache[key]) return episodesCache[key];
-
-      if (!TMDB_API_KEY || TMDB_API_KEY === "REPLACE_WITH_YOUR_TMDB_KEY") {
-        return [];
-      }
-
-      const url =
-        `${TMDB_API_BASE}/tv/${item.tmdbId}/season/${season}` +
-        `?api_key=${encodeURIComponent(TMDB_API_KEY)}&language=en-US`;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        const eps = data.episodes || [];
-        episodesCache[key] = eps;
-        return eps;
-      } catch (e) {
-        console.error(e);
-        return [];
-      }
-    }
-
-    async function renderEpisodeList(item, season, activeEpisode) {
-      episodeList.innerHTML = "Loading episodes…";
-      const eps = await loadEpisodes(item, season);
-      if (!eps.length) {
-        episodeList.innerHTML = "No episodes from TMDb.";
-        return;
-      }
-
-      episodeList.innerHTML = "";
-      eps.forEach((ep) => {
-        const row = document.createElement("div");
-        row.className =
-          "episode-row" +
-          (ep.episode_number === activeEpisode ? " active" : "");
-        const left = document.createElement("div");
-        left.className = "episode-title";
-        const epCode =
-          "S" +
-          String(season).padStart(2, "0") +
-          "E" +
-          String(ep.episode_number).padStart(2, "0");
-        left.textContent =
-          epCode + " – " + (ep.name || "Episode " + ep.episode_number);
-        const right = document.createElement("div");
-        right.className = "episode-meta";
-        right.textContent =
-          (ep.runtime ? ep.runtime + " min" : "") ||
-          (ep.air_date ? ep.air_date : "");
-
-        row.appendChild(left);
-        row.appendChild(right);
-
-        row.addEventListener("click", () => {
-          currentSeason = season;
-          currentEpisode = ep.episode_number;
-          const src = buildVidkingUrl(item, currentSeason, currentEpisode);
-          renderPlayerIframe(src);
-          item.lastSeason = currentSeason;
-          item.lastEpisode = currentEpisode;
-          markWatched(item);
-          renderPlayerDetails();
-          startPlayerWatcher();
-          pushCastIfActive(true);
-        });
-
-        episodeList.appendChild(row);
-      });
-    }
-
-    function autoAdvanceEpisode(item, season, episode) {
-      if (!item || item.type !== "tv") return;
-      const s = Number(season) || 1;
-      const e = Number(episode) || 1;
-
-      const key = `${item.type}-${item.tmdbId}-s${s}-e${e}`;
-      // Prevent double-triggering on repeated events from the same episode
-      if (lastAutoAdvanceKey === key) return;
-      lastAutoAdvanceKey = key;
-
-      (async () => {
-        const eps = await loadEpisodes(item, s);
-        if (!eps.length) return;
-
-        const idx = eps.findIndex((ep) => ep.episode_number === e);
-        if (idx === -1 || idx === eps.length - 1) {
-          // Last episode in the season → don’t auto-jump to next season for now
-          return;
-        }
-
-        const nextEpNum = eps[idx + 1].episode_number;
-
-        currentItem = item;
-        currentSeason = s;
-        currentEpisode = nextEpNum;
-
-        const src = buildVidkingUrl(item, currentSeason, currentEpisode);
-        playerContainer.innerHTML = `
-          <iframe
-            src="${src}"
-            frameborder="0"
-            allow="autoplay; fullscreen"
-            allowfullscreen
-          ></iframe>
-        `;
-
-        item.lastSeason = currentSeason;
-        item.lastEpisode = currentEpisode;
-        markWatched(item);
-        renderPlayerDetails();
-        pushCastIfActive(true);
-      })();
-    }
-
-    function autoAdvanceEpisode(item, season, episode) {
-      if (!item || item.type !== "tv") return;
-      const s = Number(season) || 1;
-      const e = Number(episode) || 1;
-
-      const key = `${item.type}-${item.tmdbId}-s${s}-e${e}`;
-      // Prevent double-triggering on repeated events from the same episode
-      if (lastAutoAdvanceKey === key) return;
-      lastAutoAdvanceKey = key;
-
-      (async () => {
-        const eps = await loadEpisodes(item, s);
-        if (!eps.length) return;
-
-        const idx = eps.findIndex((ep) => ep.episode_number === e);
-        if (idx === -1 || idx === eps.length - 1) {
-          // Last episode in the season → don’t auto-jump to next season for now
-          return;
-        }
-
-        const nextEpNum = eps[idx + 1].episode_number;
-
-        currentItem = item;
-        currentSeason = s;
-        currentEpisode = nextEpNum;
-
-        const src = buildVidkingUrl(item, currentSeason, currentEpisode);
-        playerContainer.innerHTML = `
-          <iframe
-            src="${src}"
-            frameborder="0"
-            allow="autoplay; fullscreen"
-            allowfullscreen
-          ></iframe>
-        `;
-
-        item.lastSeason = currentSeason;
-        item.lastEpisode = currentEpisode;
-        markWatched(item);
-        renderPlayerDetails();
-      })();
     }
 
     function openPlayer(item, { fromRoute }) {
@@ -1822,38 +1519,6 @@
       if (mediaType === "tv") {
         if (info.season) item.lastSeason = info.season;
         if (info.episode) item.lastEpisode = info.episode;
-      }
-
-      // Decide if this episode is effectively finished
-      const progress = typeof info.progress === "number" ? info.progress : null;
-      const duration = typeof info.duration === "number" ? info.duration : null;
-      const currentTime =
-        typeof info.currentTime === "number"
-          ? info.currentTime
-          : typeof info.timestamp === "number"
-          ? info.timestamp
-          : null;
-
-      const nearEndByProgress = progress !== null && progress >= 98;
-      const nearEndByTime =
-        duration !== null &&
-        currentTime !== null &&
-        duration > 0 &&
-        duration - currentTime <= 5; // within 5 seconds of the end
-
-      const isTv = mediaType === "tv";
-      const hasEpisodeInfo = info.season != null && info.episode != null;
-
-      // Prefer the explicit "ended" event, but also handle platforms that never fire it
-      if (
-        isTv &&
-        hasEpisodeInfo &&
-        (
-          eventType === "ended" ||
-          eventType === "timeupdate" && (nearEndByProgress || nearEndByTime)
-        )
-      ) {
-        autoAdvanceEpisode(item, info.season, info.episode);
       }
 
       saveLibrary();
