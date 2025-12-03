@@ -1227,14 +1227,7 @@
         currentEpisode = 1;
 
         const src = buildVidkingUrl(currentItem, currentSeason, currentEpisode);
-        playerContainer.innerHTML = `
-          <iframe
-            src="${src}"
-            frameborder="0"
-            allow="autoplay; fullscreen"
-            allowfullscreen
-          ></iframe>
-        `;
+        renderPlayerIframe(src);
         currentItem.lastSeason = currentSeason;
         currentItem.lastEpisode = currentEpisode;
         markWatched(currentItem);
@@ -1247,6 +1240,19 @@
     /******************************************************************
      * PLAYER
      ******************************************************************/
+    const PLAYER_IFRAME_ALLOW =
+      "autoplay *; fullscreen *; encrypted-media; picture-in-picture";
+
+    function renderPlayerIframe(src) {
+      playerContainer.innerHTML = "";
+      const iframe = document.createElement("iframe");
+      iframe.src = src;
+      iframe.frameBorder = "0";
+      iframe.allow = PLAYER_IFRAME_ALLOW;
+      iframe.allowFullscreen = true;
+      playerContainer.appendChild(iframe);
+    }
+
     function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
       const autoplayParams = "autoPlay=true";
       if (item.type === "movie") {
@@ -1617,14 +1623,7 @@
           currentSeason = season;
           currentEpisode = ep.episode_number;
           const src = buildVidkingUrl(item, currentSeason, currentEpisode);
-          playerContainer.innerHTML = `
-            <iframe
-              src="${src}"
-              frameborder="0"
-              allow="autoplay; fullscreen"
-              allowfullscreen
-            ></iframe>
-          `;
+          renderPlayerIframe(src);
           item.lastSeason = currentSeason;
           item.lastEpisode = currentEpisode;
           markWatched(item);
@@ -1737,14 +1736,7 @@
       }
 
       const src = buildVidkingUrl(item, currentSeason, currentEpisode);
-      playerContainer.innerHTML = `
-        <iframe
-          src="${src}"
-          frameborder="0"
-          allow="autoplay; fullscreen"
-          allowfullscreen
-        ></iframe>
-      `;
+      renderPlayerIframe(src);
 
       markWatched(item);
       renderPlayerDetails();
