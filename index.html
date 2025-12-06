@@ -1165,6 +1165,8 @@
       const iframe = document.createElement("iframe");
       iframe.src = src;
       iframe.frameBorder = "0";
+      iframe.width = "100%";
+      iframe.height = "600";
       iframe.allow = PLAYER_IFRAME_ALLOW;
       iframe.allowFullscreen = true;
       playerContainer.appendChild(iframe);
@@ -1173,16 +1175,17 @@
     function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
       const autoplayParams = "autoPlay=true";
       if (item.type === "movie") {
-        return `https://www.vidking.net/embed/movie/${item.tmdbId}?${autoplayParams}`;
+        const params = [autoplayParams, "nextEpisode=true", "episodeSelector=true"];
+        return `https://www.vidking.net/embed/movie/${item.tmdbId}?${params.join("&")}`;
       }
 
       // Prefer our own next-episode logic, but allow the embed to handle it on TV/BrowseHere fallbacks.
       const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
-      const params = [`${autoplayParams}`, "episodeSelector=true"];
+      const params = [`${autoplayParams}`, "nextEpisode=true", "episodeSelector=true"];
       const enableAutonext =
         useEmbedAutonext || isCasting || options.forceEmbedAutonext;
       if (enableAutonext) {
-        params.push("nextEpisode=true", "autonext=true");
+        params.push("autonext=true");
       }
       return `${base}?${params.join("&")}`;
     }
