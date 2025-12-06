@@ -1175,17 +1175,13 @@
 
     function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
       if (item.type === "movie") {
-        return `https://www.vidking.net/embed/movie/${item.tmdbId}`;
+        const params = [autoplayParams, "nextEpisode=true", "episodeSelector=true"];
+        return `https://www.vidking.net/embed/movie/${item.tmdbId}?${params.join("&")}`;
       }
 
       // Prefer our own next-episode logic, but allow the embed to handle it on TV/BrowseHere fallbacks.
       const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
-      const params = [
-        "color=e50914",
-        "autoPlay=true",
-        "nextEpisode=true",
-        "episodeSelector=true"
-      ];
+      const params = [`${autoplayParams}`, "nextEpisode=true", "episodeSelector=true"];
       const enableAutonext =
         useEmbedAutonext || isCasting || options.forceEmbedAutonext;
       if (enableAutonext) {
