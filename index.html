@@ -287,33 +287,27 @@
     }
 
     .player-wrapper {
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .player-aspect {
       position: relative;
       width: 100%;
-      /* 16:9 aspect ratio that works on older browsers (Android TV) */
-      padding-top: 56.25%;
-      max-height: calc(100vh - 220px);
-      border-radius: var(--radius-sm);
-      overflow: hidden;
-      background: #000;
-      margin-bottom: 0.75rem;
+      padding-bottom: 56.25%; /* 16:9 */
+    }
+
+    .player-aspect iframe {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
     }
 
     body.theater .player-wrapper {
-      position: relative;
-      width: 100%;
-      /* same 16:9 ratio in theater mode */
-      padding-top: 56.25%;
-      max-height: calc(100vh - 120px);
-      border-radius: 0;
-      margin: 0 auto 0.75rem;
-    }
-
-    .player-wrapper iframe {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      border: 0;
+      max-width: none;
     }
 
     #playerBottomRow {
@@ -661,7 +655,20 @@
           </div>
         </div>
 
-        <div class="player-wrapper" id="playerContainer"></div>
+        <div class="player-wrapper" id="playerContainer">
+          <div class="player-aspect">
+            <iframe
+              id="vidkingPlayerFrame"
+              src=""
+              width="100%"
+              height="100%"
+              frameborder="0"
+              allowfullscreen
+              allow="fullscreen"
+              loading="lazy"
+            ></iframe>
+          </div>
+        </div>
 
         <div id="playerBottomRow">
           <div id="descriptionPanel">
@@ -781,7 +788,8 @@
       if (leavingPlayer) {
         // clear iframe so Vidking stops audio
         stopPlayerWatcher();
-        playerContainer.innerHTML = "";
+        const iframe = document.getElementById("vidkingPlayerFrame");
+        if (iframe) iframe.src = "";
         document.body.classList.remove("theater");
         theaterBtn.textContent = "Theater mode";
       }
@@ -1167,36 +1175,68 @@
     /******************************************************************
      * PLAYER
      ******************************************************************/
-    const PLAYER_IFRAME_ALLOW =
-      "autoplay *; fullscreen *; encrypted-media; picture-in-picture";
+    function buildVidkingEmbedUrl(item, progressSeconds) {
+      // item.type: "movie" | "tv"
+      // item.id: TMDB id (string or number)
+      // item.season, item.episode: for TV shows (fallback to 1)
+      const base = "https://www.vidking.net";
+      const tmdbId = item.id || item.tmdbId;
+      if (!tmdbId) return "";
+      let path;
 
-    function renderPlayerIframe(src) {
-      playerContainer.innerHTML = "";
-      const iframe = document.createElement("iframe");
-      iframe.src = src;
-      iframe.frameBorder = "0";
-      iframe.width = "100%";
-      iframe.height = "600";
-      iframe.allow = PLAYER_IFRAME_ALLOW;
-      iframe.allowFullscreen = true;
-      playerContainer.appendChild(iframe);
+      if (item.type === "tv") {
+        const season = item.season || item.lastSeason || 1;
+        const episode = item.episode || item.lastEpisode || 1;
+        path = `/embed/tv/${tmdbId}/${season}/${episode}`;
+      } else {
+        path = `/embed/movie/${tmdbId}`;
+      }
+
+      const params = new URLSearchParams({
+        color: "9146ff", // brand color
+        autoPlay: "true" // start automatically
+      });
+
+      // TV-only features
+      if (item.type === "tv") {
+        params.set("nextEpisode", "true");
+        params.set("episodeSelector", "true");
+      }
+
+      if (progressSeconds && progressSeconds > 0) {
+        params.set("progress", Math.floor(progressSeconds).toString());
+      }
+
+      return `${base}${path}?${params.toString()}`;
     }
 
-    function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
-      if (item.type === "movie") {
-        const params = [autoplayParams, "nextEpisode=true", "episodeSelector=true"];
-        return `https://www.vidking.net/embed/movie/${item.tmdbId}?${params.join("&")}`;
+    function loadVidkingStream(item) {
+      const iframe = document.getElementById("vidkingPlayerFrame");
+      if (!iframe) return;
+
+      const embedItem = {
+        ...item,
+        id: item.tmdbId || item.id,
+        season: item.season || item.lastSeason || currentSeason || 1,
+        episode: item.episode || item.lastEpisode || currentEpisode || 1
+      };
+
+      // Load saved progress for this item if available
+      let resumeSeconds = 0;
+      try {
+        const key = `vk.progress.${embedItem.type}.${embedItem.id}`;
+        const saved = localStorage.getItem(key);
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data && typeof data.currentTime === "number") {
+            resumeSeconds = data.currentTime;
+          }
+        }
+      } catch (e) {
+        console.warn("Could not read saved Vidking progress", e);
       }
 
-      // Prefer our own next-episode logic, but allow the embed to handle it on TV/BrowseHere fallbacks.
-      const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
-      const params = [`${autoplayParams}`, "nextEpisode=true", "episodeSelector=true"];
-      const enableAutonext =
-        useEmbedAutonext || isCasting || options.forceEmbedAutonext;
-      if (enableAutonext) {
-        params.push("autonext=true");
-      }
-      return `${base}?${params.join("&")}`;
+      iframe.src = buildVidkingEmbedUrl(embedItem, resumeSeconds);
     }
 
     function stopPlayerWatcher() {
@@ -1239,6 +1279,40 @@
         }
       }, 1500);
     }
+
+    window.addEventListener("message", (event) => {
+      let data = event.data;
+
+      try {
+        if (typeof data === "string") {
+          data = JSON.parse(data);
+        }
+      } catch {
+        return;
+      }
+
+      if (!data || data.type !== "PLAYER_EVENT" || !data.data) return;
+
+      const payload = data.data;
+      // Expected payload fields based on Vidking docs:
+      // id, mediatype ("movie" | "tv"), currentTime, duration,
+      // progress (0–1), season, episode, timestamp, etc.
+
+      const key = `vk.progress.${payload.mediatype}.${payload.id}`;
+      const toStore = {
+        currentTime: payload.currentTime,
+        progress: payload.progress,
+        season: payload.season,
+        episode: payload.episode,
+        timestamp: payload.timestamp
+      };
+
+      try {
+        localStorage.setItem(key, JSON.stringify(toStore));
+      } catch (e) {
+        console.warn("Could not save Vidking progress", e);
+      }
+    });
 
     /******************************************************************
      * CASTING
@@ -1343,9 +1417,17 @@
       if (!isCasting || !castSession || !currentItem) return;
       if (!(window.chrome && chrome.cast && chrome.cast.media)) return;
 
-      const src = buildVidkingUrl(currentItem, currentSeason, currentEpisode, {
-        forceEmbedAutonext: forceAutonext
-      });
+      const embedItem = {
+        ...currentItem,
+        id: currentItem.tmdbId || currentItem.id,
+        season: currentSeason,
+        episode: currentEpisode
+      };
+
+      const src = buildVidkingEmbedUrl(
+        embedItem,
+        currentItem.lastPosition || currentItem.lastProgress || 0
+      );
 
       const mediaInfo = new chrome.cast.media.MediaInfo(src, "text/html");
       mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
@@ -1500,8 +1582,14 @@
         currentEpisode = 1;
       }
 
-      const src = buildVidkingUrl(item, currentSeason, currentEpisode);
-      renderPlayerIframe(src);
+      const embedItem = {
+        ...item,
+        id: item.tmdbId || item.id,
+        season: currentSeason,
+        episode: currentEpisode
+      };
+
+      loadVidkingStream(embedItem);
 
       markWatched(item);
       renderPlayerDetails();
@@ -1565,9 +1653,10 @@
         };
       }
 
-      if (!info || !info.id || !info.mediaType) return;
+      if (!info || !info.id || !(info.mediaType || info.mediatype)) return;
 
-      const mediaType = info.mediaType === "tv" ? "tv" : "movie";
+      const mediaType =
+        (info.mediaType || info.mediatype) === "tv" ? "tv" : "movie";
       const tmdbId = String(info.id);
       const eventType = info.eventType || info.type || null;
 
