@@ -1143,7 +1143,8 @@
       if (e.key === "Enter") {
         const query = searchInput.value;
         if (tmdbSearchInput) tmdbSearchInput.value = query;
-        setRoute("home");
+        setRoute("search");
+        tmdbSearchInput?.focus();
         searchTmdb(query);
       }
     });
@@ -1665,12 +1666,15 @@
       });
     }
 
-    tmdbSearchButton.addEventListener("click", () =>
-      searchTmdb(tmdbSearchInput.value)
-    );
+    tmdbSearchButton.addEventListener("click", () => {
+      setRoute("search");
+      tmdbSearchInput?.focus();
+      searchTmdb(tmdbSearchInput.value);
+    });
     tmdbSearchInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
+        setRoute("search");
         searchTmdb(tmdbSearchInput.value);
       }
     });
