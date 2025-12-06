@@ -907,8 +907,7 @@
     function makeCard(item, opts = {}) {
       const div = document.createElement("div");
       div.className = "item-card vk-card";
-      const tmdbId = normalizeTmdbId(item.tmdbId || item.id || "");
-      div.dataset.vidkingId = tmdbId;
+      div.dataset.vidkingId = item.tmdbId || item.id || "";
       div.dataset.vidkingType = item.type || "";
       div.dataset.vidkingTitle = item.title || "";
       div.dataset.vidkingBackdrop = item.backdrop || item.backdropPath || "";
@@ -1433,11 +1432,6 @@
       updateWatchlistButton();
     }
 
-    function normalizeTmdbId(rawId) {
-      const match = String(rawId || "").match(/(\d+)/);
-      return match ? match[1] : "";
-    }
-
     function openVidkingPlayer(item) {
       const homeView = document.getElementById("homeSection");
       const searchView = document.getElementById("searchSection");
@@ -1449,11 +1443,11 @@
       });
       if (playerView) playerView.classList.add("active");
 
-      const tmdbId = normalizeTmdbId(item.tmdbId || item.id || "");
+      const tmdbId = item.tmdbId || item.id || "";
       const existing = tmdbId ? findInLibraryByTmdb(item.type, tmdbId) : null;
       const normalizedItem = existing || {
         id: item.id || `${item.type || "item"}-${tmdbId || Date.now()}`,
-        tmdbId,
+        tmdbId: tmdbId,
         type: item.type,
         title: item.title || "Unknown title",
         overview: item.overview || "",
@@ -1795,13 +1789,9 @@
 
       event.preventDefault();
 
-      const tmdbId = normalizeTmdbId(
-        card.dataset.vidkingId || card.dataset.vidkingTmdbId || ""
-      );
-
       const item = {
-        id: card.dataset.vidkingId || tmdbId,
-        tmdbId,
+        id: card.dataset.vidkingId,
+        tmdbId: card.dataset.vidkingId,
         type: card.dataset.vidkingType,
         title: card.dataset.vidkingTitle || "",
         backdropPath: card.dataset.vidkingBackdrop || "",
