@@ -841,6 +841,9 @@
       const poster = result.poster_path
         ? TMDB_IMG_BASE + result.poster_path
         : "";
+      const backdrop = result.backdrop_path
+        ? TMDB_IMG_BASE + result.backdrop_path
+        : "";
 
       const item = {
         id: `${isMovie ? "movie" : "tv"}-${tmdbId}-${Date.now()}`,
@@ -850,6 +853,7 @@
         year,
         overview,
         poster,
+        backdrop,
         addedAt: Date.now(),
         lastWatchedAt: 0,
         isWatchlist: !!makeWatchlist,
@@ -902,7 +906,15 @@
      ******************************************************************/
     function makeCard(item, opts = {}) {
       const div = document.createElement("div");
-      div.className = "item-card";
+      div.className = "item-card vk-card";
+      const tmdbId = normalizeTmdbId(item.tmdbId || item.id || "");
+      div.dataset.vidkingId = tmdbId;
+      div.dataset.vidkingType = item.type || "";
+      div.dataset.vidkingTitle = item.title || "";
+      div.dataset.vidkingBackdrop = item.backdrop || item.backdropPath || "";
+      div.dataset.vidkingPoster = item.poster || item.posterPath || "";
+      div.dataset.vidkingOverview = item.overview || "";
+      div.dataset.vidkingYear = item.year || "";
 
       const posterWrap = document.createElement("div");
       posterWrap.className = "item-poster";
@@ -973,10 +985,6 @@
         div.appendChild(actionsWrap);
       }
 
-      div.addEventListener("click", () => {
-        openPlayer(item, { fromRoute: opts.fromRoute || "home" });
-      });
-
       return div;
     }
 
@@ -1029,7 +1037,8 @@
           title: r.title,
           year: (r.release_date || "").slice(0, 4),
           overview: r.overview || "",
-          poster: r.poster_path ? TMDB_IMG_BASE + r.poster_path : ""
+          poster: r.poster_path ? TMDB_IMG_BASE + r.poster_path : "",
+          backdrop: r.backdrop_path ? TMDB_IMG_BASE + r.backdrop_path : ""
         };
         const card = makeCard(temp, {
           rightLabel: "Popular",
@@ -1049,7 +1058,8 @@
           title: r.name,
           year: (r.first_air_date || "").slice(0, 4),
           overview: r.overview || "",
-          poster: r.poster_path ? TMDB_IMG_BASE + r.poster_path : ""
+          poster: r.poster_path ? TMDB_IMG_BASE + r.poster_path : "",
+          backdrop: r.backdrop_path ? TMDB_IMG_BASE + r.backdrop_path : ""
         };
         const card = makeCard(temp, {
           rightLabel: "Popular",
@@ -1423,6 +1433,67 @@
       updateWatchlistButton();
     }
 
+    function normalizeTmdbId(rawId) {
+      const match = String(rawId || "").match(/(\d+)/);
+      return match ? match[1] : "";
+    }
+
+    function openVidkingPlayer(item) {
+      const homeView = document.getElementById("homeSection");
+      const searchView = document.getElementById("searchSection");
+      const libraryView = document.getElementById("librarySection");
+      const playerView = document.getElementById("playerSection");
+
+      [homeView, searchView, libraryView].forEach((view) => {
+        if (view) view.classList.remove("active");
+      });
+      if (playerView) playerView.classList.add("active");
+
+      const tmdbId = normalizeTmdbId(item.tmdbId || item.id || "");
+      const existing = tmdbId ? findInLibraryByTmdb(item.type, tmdbId) : null;
+      const normalizedItem = existing || {
+        id: item.id || `${item.type || "item"}-${tmdbId || Date.now()}`,
+        tmdbId,
+        type: item.type,
+        title: item.title || "Unknown title",
+        overview: item.overview || "",
+        year: item.year || "",
+        poster: item.posterPath || item.poster || "",
+        backdrop: item.backdropPath || item.backdrop || "",
+        lastSeason: item.lastSeason || 1,
+        lastEpisode: item.lastEpisode || 0,
+        lastProgress: item.lastProgress || 0,
+        lastPosition: item.lastPosition || 0,
+        lastDuration: item.lastDuration || 0
+      };
+
+      try {
+        localStorage.setItem(
+          "vk.currentItem",
+          JSON.stringify({
+            id: normalizedItem.tmdbId || normalizedItem.id,
+            type: normalizedItem.type,
+            title: normalizedItem.title,
+            backdropPath: normalizedItem.backdrop || "",
+            posterPath: normalizedItem.poster || "",
+            overview: normalizedItem.overview || "",
+            year: normalizedItem.year || ""
+          })
+        );
+      } catch (e) {
+        console.warn("Unable to store current Vidking item in localStorage", e);
+      }
+
+      if (typeof openPlayer === "function") {
+        openPlayer(normalizedItem, { fromRoute: currentRoute || "home" });
+        return;
+      }
+
+      if (typeof loadVidkingStream === "function") {
+        loadVidkingStream(normalizedItem);
+      }
+    }
+
     function openPlayer(item, { fromRoute }) {
       currentItem = item;
 
@@ -1716,6 +1787,31 @@
         renderHome();
       }
     }
+
+    // Global delegated click handler for all Vidking cards
+    document.addEventListener("click", (event) => {
+      const card = event.target.closest(".vk-card[data-vidking-id]");
+      if (!card) return;
+
+      event.preventDefault();
+
+      const tmdbId = normalizeTmdbId(
+        card.dataset.vidkingId || card.dataset.vidkingTmdbId || ""
+      );
+
+      const item = {
+        id: card.dataset.vidkingId || tmdbId,
+        tmdbId,
+        type: card.dataset.vidkingType,
+        title: card.dataset.vidkingTitle || "",
+        backdropPath: card.dataset.vidkingBackdrop || "",
+        posterPath: card.dataset.vidkingPoster || "",
+        overview: card.dataset.vidkingOverview || "",
+        year: card.dataset.vidkingYear || ""
+      };
+
+      openVidkingPlayer(item);
+    });
 
     /******************************************************************
      * INIT
