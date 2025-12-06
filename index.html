@@ -1173,7 +1173,6 @@
     }
 
     function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
-      const autoplayParams = "autoPlay=true";
       if (item.type === "movie") {
         const params = [autoplayParams, "nextEpisode=true", "episodeSelector=true"];
         return `https://www.vidking.net/embed/movie/${item.tmdbId}?${params.join("&")}`;
