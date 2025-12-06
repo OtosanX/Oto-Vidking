@@ -31,6 +31,7 @@
 
     body.theater {
       background: #000;
+      overflow-x: hidden;
     }
 
     .page {
@@ -237,6 +238,9 @@
     /* PLAYER PAGE */
 
     #playerSectionWrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       background: radial-gradient(circle at top, #020617, #000);
       padding: 1rem;
       border-radius: 1.1rem;
@@ -286,12 +290,15 @@
       background: rgba(37,99,235,0.25);
     }
 
+    /* Base player layout (non-theater) */
     .player-wrapper {
       width: 100%;
-      max-width: 1100px;
+      max-width: 1200px;      /* reasonable default in normal mode */
       margin: 0 auto;
+      padding: 0 1rem;
     }
 
+    /* 16:9 aspect-ratio box */
     .player-aspect {
       position: relative;
       width: 100%;
@@ -300,14 +307,41 @@
 
     .player-aspect iframe {
       position: absolute;
-      top: 0;
-      left: 0;
+      inset: 0;
       width: 100%;
       height: 100%;
+      border: 0;
+    }
+
+    /* When theater mode is active, remove width limits and use the viewport */
+    body.theater #playerSectionWrapper,
+    body.theater #playerSection {
+      align-items: center;
     }
 
     body.theater .player-wrapper {
-      max-width: none;
+      width: 100vw;
+      max-width: 100vw;
+      padding: 0;
+    }
+
+    body.theater .player-aspect {
+      width: 100vw;
+      max-width: 100vw;
+      padding-bottom: 56.25%; /* still 16:9, but now full width */
+    }
+
+    /* Optional: small horizontal padding so it doesn't touch the edges */
+    @media (min-width: 768px) {
+      body.theater .player-wrapper {
+        width: 96vw;
+        max-width: 96vw;
+      }
+
+      body.theater .player-aspect {
+        width: 96vw;
+        max-width: 96vw;
+      }
     }
 
     #playerBottomRow {
@@ -473,7 +507,7 @@
     }
 
     body.theater #playerSection {
-      padding-top: 0.4rem;
+      padding: 0;
     }
 
     /* DEVICE ADAPTIVE STYLES */
