@@ -1143,7 +1143,8 @@
       if (e.key === "Enter") {
         const query = searchInput.value;
         if (tmdbSearchInput) tmdbSearchInput.value = query;
-        setRoute("home");
+        setRoute("search");
+        tmdbSearchInput?.focus();
         searchTmdb(query);
       }
     });
@@ -1165,24 +1166,30 @@
       const iframe = document.createElement("iframe");
       iframe.src = src;
       iframe.frameBorder = "0";
+      iframe.width = "100%";
+      iframe.height = "600";
       iframe.allow = PLAYER_IFRAME_ALLOW;
       iframe.allowFullscreen = true;
       playerContainer.appendChild(iframe);
     }
 
     function buildVidkingUrl(item, season = 1, episode = 1, options = {}) {
-      const autoplayParams = "autoPlay=true";
       if (item.type === "movie") {
-        return `https://www.vidking.net/embed/movie/${item.tmdbId}?${autoplayParams}`;
+        return `https://www.vidking.net/embed/movie/${item.tmdbId}`;
       }
 
       // Prefer our own next-episode logic, but allow the embed to handle it on TV/BrowseHere fallbacks.
       const base = `https://www.vidking.net/embed/tv/${item.tmdbId}/${season}/${episode}`;
-      const params = [`${autoplayParams}`, "episodeSelector=true"];
+      const params = [
+        "color=e50914",
+        "autoPlay=true",
+        "nextEpisode=true",
+        "episodeSelector=true"
+      ];
       const enableAutonext =
         useEmbedAutonext || isCasting || options.forceEmbedAutonext;
       if (enableAutonext) {
-        params.push("nextEpisode=true", "autonext=true");
+        params.push("autonext=true");
       }
       return `${base}?${params.join("&")}`;
     }
@@ -1663,12 +1670,15 @@
       });
     }
 
-    tmdbSearchButton.addEventListener("click", () =>
-      searchTmdb(tmdbSearchInput.value)
-    );
+    tmdbSearchButton.addEventListener("click", () => {
+      setRoute("search");
+      tmdbSearchInput?.focus();
+      searchTmdb(tmdbSearchInput.value);
+    });
     tmdbSearchInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
+        setRoute("search");
         searchTmdb(tmdbSearchInput.value);
       }
     });
