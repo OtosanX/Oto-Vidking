@@ -40,11 +40,6 @@
       padding: 1.25rem 1rem 2.5rem;
     }
 
-    body.theater .page {
-      max-width: none;
-      padding: 0;
-    }
-
     header {
       display: flex;
       flex-direction: column;
@@ -1659,7 +1654,6 @@
       theaterBtn.textContent = document.body.classList.contains("theater")
         ? "Exit theater"
         : "Theater mode";
-      resizePlayerWrapper();
     });
 
     /******************************************************************
