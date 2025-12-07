@@ -31,17 +31,13 @@
 
     body.theater {
       background: #000;
+      overflow-x: hidden;
     }
 
     .page {
       max-width: 1200px;
       margin: 0 auto;
       padding: 1.25rem 1rem 2.5rem;
-    }
-
-    body.theater .page {
-      max-width: none;
-      padding: 0;
     }
 
     header {
@@ -237,18 +233,15 @@
     /* PLAYER PAGE */
 
     #playerSectionWrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       background: radial-gradient(circle at top, #020617, #000);
       padding: 1rem;
       border-radius: 1.1rem;
       border: 1px solid var(--border);
       box-shadow: 0 18px 50px rgba(0,0,0,0.55);
-    }
-
-    body.theater #playerSectionWrapper {
-      border-radius: 0;
-      border: none;
-      box-shadow: none;
-      padding: 0.5rem;
+      width: 100%;
     }
 
     #playerTopRow {
@@ -286,12 +279,15 @@
       background: rgba(37,99,235,0.25);
     }
 
+    /* Base player layout (non-theater) */
     .player-wrapper {
       width: 100%;
-      max-width: 1100px;
+      max-width: 1200px;      /* reasonable default in normal mode */
       margin: 0 auto;
+      padding: 0 1rem;
     }
 
+    /* 16:9 aspect-ratio box */
     .player-aspect {
       position: relative;
       width: 100%;
@@ -300,14 +296,43 @@
 
     .player-aspect iframe {
       position: absolute;
-      top: 0;
-      left: 0;
+      inset: 0;
       width: 100%;
       height: 100%;
+      border: 0;
     }
 
-    body.theater .player-wrapper {
+    /* === THEATER MODE FIXES (FULL-WIDTH + BOTTOM PADDING) === */
+
+    /* Make page full-width when in theater mode */
+    body.theater .page {
       max-width: none;
+      width: 100vw;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Remove extra rounding and shadows so it looks fullscreen */
+    body.theater #playerSectionWrapper {
+      border-radius: 0;
+      border: none;
+      box-shadow: none;
+      padding: 0;
+    }
+
+    /* Let player stretch edge-to-edge */
+    body.theater .player-wrapper {
+      max-width: 100vw;
+      padding: 0;
+    }
+
+    /* Add bottom space so video never sinks off-screen */
+    body.theater #playerSection {
+      padding-bottom: 2rem !important;
+    }
+
+    body.theater #playerSectionWrapper {
+      padding-bottom: 2rem !important;
     }
 
     #playerBottomRow {
@@ -470,10 +495,6 @@
     body.theater #homeSection,
     body.theater #librarySection {
       display: none !important;
-    }
-
-    body.theater #playerSection {
-      padding-top: 0.4rem;
     }
 
     /* DEVICE ADAPTIVE STYLES */
@@ -1618,7 +1639,6 @@
       theaterBtn.textContent = document.body.classList.contains("theater")
         ? "Exit theater"
         : "Theater mode";
-      resizePlayerWrapper();
     });
 
     /******************************************************************
