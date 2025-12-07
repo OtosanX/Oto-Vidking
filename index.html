@@ -279,10 +279,10 @@
       background: rgba(37,99,235,0.25);
     }
 
-    /* Base player layout (non-theater) */
+    /* Same player layout for normal + theater (16:9 box) */
     .player-wrapper {
       width: 100%;
-      max-width: 1200px;      /* reasonable default in normal mode */
+      max-width: 1200px;
       margin: 0 auto;
       padding: 0 1rem;
     }
@@ -292,6 +292,7 @@
       position: relative;
       width: 100%;
       padding-bottom: 56.25%; /* 16:9 */
+      background: #000;
     }
 
     .player-aspect iframe {
@@ -304,6 +305,9 @@
 
     #playerBottomRow {
       margin-top: 0.75rem;
+      width: 100%;
+      max-width: 1200px;
+      padding: 0 1rem;
     }
 
     #descriptionPanel {
@@ -494,7 +498,7 @@
     }
 
     body.theater #playerSection {
-      padding: 0 0 2rem;
+      padding: 0;
     }
 
     /* DEVICE ADAPTIVE STYLES */
