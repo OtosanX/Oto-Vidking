@@ -817,12 +817,14 @@ footer {
      ******************************************************************/
     function setRoute(route) {
       const leavingPlayer = currentRoute === "player" && route !== "player";
+      const hidingPlayer = route !== "player";
 
-      if (leavingPlayer) {
-        // clear iframe so Vidking stops audio
+      if (leavingPlayer || hidingPlayer) {
+        // clear iframe so Vidking stops audio whenever player is hidden
         stopPlayerWatcher();
         const iframe = document.getElementById("vidkingPlayerFrame");
         if (iframe) iframe.src = "";
+        lastPlayerSrc = "";
         document.body.classList.remove("theater");
         theaterBtn.textContent = "Theater mode";
       }
@@ -1619,6 +1621,12 @@ footer {
         season: currentSeason,
         episode: currentEpisode
       };
+
+      stopPlayerWatcher();
+      const iframe = document.getElementById("vidkingPlayerFrame");
+      if (iframe) {
+        iframe.src = "";
+      }
 
       loadVidkingStream(embedItem);
 
